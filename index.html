@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gestão Comercial</title><link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="login" class="login">
+  <form id="loginForm" class="login-card">
+    <h1>Gestão Comercial</h1><p>Acesse sua conta</p>
+    <label>E-mail<input id="email" type="email" required></label>
+    <label>Senha<input id="password" type="password" required></label>
+    <button>Entrar</button><p id="loginError" class="error"></p>
+  </form>
+</div>
+<div id="app" hidden>
+<header><div><b>Gestão Comercial</b><small id="userEmail"></small></div><button id="logout" class="light">Sair</button></header>
+<aside id="menu">
+  <button data-page="dashboard" class="selected">Resumo</button>
+  <button data-page="clientes">Clientes</button><button data-page="produtos">Estoque</button>
+  <button data-page="vendas">Vendas</button><button data-page="promissorias">Promissórias</button>
+  <button data-page="ordens">Ordens de serviço</button><button data-page="caixa">Fluxo de caixa</button>
+</aside>
+<main><div id="content"></div></main>
+</div>
+<script type="module" src="app.js"></script>
+</body></html>

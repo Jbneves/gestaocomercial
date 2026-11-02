@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // V1: somente usuários autenticados podem ler e gravar.
+    // Para produção, evolua estas regras para permissões por perfil/empresa.
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
