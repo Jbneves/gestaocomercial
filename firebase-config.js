@@ -3,9 +3,9 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-aut
 import { getDatabase } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
 
 const firebaseConfig = {
-  apiKey: "SUA_API_KEY",
+  apiKey: "AIzaSyBHx2sTkgObdPCkVLCAbkOAFeFpJifjPiM",
   authDomain: "estao-comercial-web.firebaseapp.com",
-  databaseURL: "COLOQUE_AQUI_A_URL_DO_REALTIME_DATABASE",
+  databaseURL: "https://estao-comercial-web-default-rtdb.firebaseio.com",
   projectId: "estao-comercial-web",
   storageBucket: "estao-comercial-web.firebasestorage.app",
   messagingSenderId: "895007956126",
