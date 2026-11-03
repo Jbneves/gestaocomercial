@@ -63,7 +63,7 @@ const configs = {
     fields: [
       ["nome", "Produto/equipamento"],
       ["codigo", "Código"],
-      ["quantidade", "Quantidade inicial", "number"],
+      ["quantidade", "Quantidade", "number"],
       ["custo", "Custo unitário", "number"],
       ["preco", "Preço de venda", "number"]
     ]
@@ -189,6 +189,273 @@ function hoje() {
 function dinheiroEmCentavos(valor) {
 
   return Math.round((Number(valor) + Number.EPSILON) * 100);
+
+}
+
+
+// ======================================
+// MOVIMENTAÇÃO DE ESTOQUE
+// ======================================
+
+function configurarEstoque(produtos) {
+
+  const form = $("#movementForm");
+
+  if (!form) return;
+
+  const productSelect = $("#movementProduct");
+  const typeSelect = $("#movementType");
+  const quantityInput = $("#movementQuantity");
+  const reasonInput = $("#movementReason");
+
+  // Selecionar produto pelo botão da tabela.
+
+  content.querySelectorAll("[data-stock-move]").forEach(button => {
+
+    button.addEventListener("click", () => {
+
+      productSelect.value = button.dataset.stockMove;
+
+      form.scrollIntoView({
+        behavior: "smooth",
+        block: "center"
+      });
+
+      quantityInput.focus();
+
+    });
+
+  });
+
+
+  // Registrar entrada ou baixa.
+
+  form.addEventListener("submit", async e => {
+
+    e.preventDefault();
+
+    const button = form.querySelector('button[type="submit"]');
+
+    const produtoId = productSelect.value;
+    const tipo = typeSelect.value;
+    const quantidade = Number(quantityInput.value);
+    const motivo = reasonInput.value.trim();
+
+    if (!produtoId) {
+      alert("Selecione um produto.");
+      return;
+    }
+
+    if (!["Entrada", "Baixa"].includes(tipo)) {
+      alert("Selecione uma operação válida.");
+      return;
+    }
+
+    if (!Number.isFinite(quantidade) || quantidade <= 0) {
+      alert("Informe uma quantidade válida.");
+      return;
+    }
+
+    if (!motivo) {
+      alert("Informe o motivo da movimentação.");
+      return;
+    }
+
+    const produto = produtos.find(p => p.id === produtoId);
+
+    if (!produto) {
+      alert("Produto não encontrado.");
+      return;
+    }
+
+    if (!confirm(
+      `${tipo} de ${quantidade} unidade(s) do produto ${produto.nome}?\n\n` +
+      `Estoque atual: ${produto.quantidade}`
+    )) return;
+
+    button.disabled = true;
+    button.textContent = "Processando...";
+
+    const produtoRef = ref(db, `produtos/${produtoId}`);
+
+    let movimentacaoRealizada = false;
+
+    try {
+
+      // Atualizar estoque usando transação.
+
+      const resultado = await runTransaction(
+        produtoRef,
+        atual => {
+
+          if (!atual) return;
+
+          const estoqueAtual = Number(atual.quantidade ?? 0);
+
+          if (
+            !Number.isFinite(estoqueAtual) ||
+            estoqueAtual < 0
+          ) {
+            return;
+          }
+
+          if (tipo === "Baixa" && estoqueAtual < quantidade) {
+            return;
+          }
+
+          const novoSaldo = tipo === "Entrada"
+            ? estoqueAtual + quantidade
+            : estoqueAtual - quantidade;
+
+          return {
+            ...atual,
+            quantidade: Math.round(novoSaldo * 100) / 100
+          };
+
+        }
+      );
+
+
+      if (!resultado.committed) {
+
+        const atual = resultado.snapshot.val();
+
+        if (!atual) {
+          throw new Error("O produto não foi encontrado no estoque.");
+        }
+
+        const estoqueAtual = Number(atual.quantidade ?? 0);
+
+        if (tipo === "Baixa" && estoqueAtual < quantidade) {
+
+          throw new Error(
+            `Estoque insuficiente. Saldo atual: ${estoqueAtual}.`
+          );
+
+        }
+
+        throw new Error("Não foi possível atualizar o estoque.");
+
+      }
+
+
+      movimentacaoRealizada = true;
+
+      const produtoAtualizado = resultado.snapshot.val();
+
+      const saldoNovo = Number(produtoAtualizado.quantidade);
+
+      const saldoAnterior = tipo === "Entrada"
+        ? saldoNovo - quantidade
+        : saldoNovo + quantidade;
+
+
+      // Criar registro no histórico.
+
+      const historicoRef = push(
+        ref(db, "movimentacoes_estoque")
+      );
+
+      await set(historicoRef, {
+
+        produtoId,
+
+        produtoNome: produtoAtualizado.nome || produto.nome,
+
+        tipo,
+
+        quantidade,
+
+        saldoAnterior,
+
+        saldoNovo,
+
+        motivo,
+
+        data: hoje(),
+
+        usuario: user.email || user.uid,
+
+        criadoPor: user.uid,
+
+        criadoEm: serverTimestamp()
+
+      });
+
+
+      alert(
+        "Movimentação registrada com sucesso!\n\n" +
+        `Produto: ${produto.nome}\n` +
+        `Operação: ${tipo}\n` +
+        `Quantidade: ${quantidade}\n` +
+        `Saldo anterior: ${saldoAnterior}\n` +
+        `Saldo atual: ${saldoNovo}`
+      );
+
+      await render();
+
+    } catch (err) {
+
+      console.error("Erro na movimentação:", err);
+
+      // Se o estoque foi alterado, mas o histórico não foi
+      // salvo, tentar restaurar o saldo anterior.
+
+      if (movimentacaoRealizada) {
+
+        try {
+
+          await runTransaction(produtoRef, atual => {
+
+            if (!atual) return;
+
+            const estoqueAtual = Number(atual.quantidade ?? 0);
+
+            const saldoRestaurado = tipo === "Entrada"
+              ? estoqueAtual - quantidade
+              : estoqueAtual + quantidade;
+
+            if (saldoRestaurado < 0) return;
+
+            return {
+              ...atual,
+              quantidade: Math.round(saldoRestaurado * 100) / 100
+            };
+
+          });
+
+        } catch (rollbackError) {
+
+          console.error(
+            "Erro ao restaurar estoque:",
+            rollbackError
+          );
+
+          alert(
+            "Atenção: não foi possível restaurar automaticamente " +
+            "o estoque. Confira o saldo do produto."
+          );
+
+        }
+
+      }
+
+      alert("Erro na movimentação: " + err.message);
+
+    } finally {
+
+      if (button.isConnected) {
+
+        button.disabled = false;
+
+        button.innerHTML =
+          '<i class="fa-solid fa-arrows-rotate"></i> Registrar movimentação';
+
+      }
+
+    }
+
+  });
 
 }
 
@@ -635,8 +902,6 @@ function configurarVenda(data, produtos, clientes, currentRender) {
 
     const rows = paymentsContainer.querySelectorAll(".payment-row");
 
-    // Se houver apenas uma forma de pagamento,
-    // preencher automaticamente com o total da venda.
     if (rows.length === 1) {
 
       rows[0].querySelector(".payment-value").value =
@@ -714,7 +979,6 @@ function configurarVenda(data, produtos, clientes, currentRender) {
     button.disabled = true;
     button.textContent = "Registrando venda...";
 
-    let estoqueBaixado = false;
     let stockRef = null;
     let quantidade = 0;
 
@@ -831,9 +1095,7 @@ function configurarVenda(data, produtos, clientes, currentRender) {
       }
 
 
-      // ==================================
       // BAIXAR ESTOQUE COM TRANSAÇÃO
-      // ==================================
 
       stockRef = ref(
         db,
@@ -877,12 +1139,8 @@ function configurarVenda(data, produtos, clientes, currentRender) {
 
       }
 
-      estoqueBaixado = true;
 
-
-      // ==================================
       // PREPARAR GRAVAÇÃO DA VENDA
-      // ==================================
 
       const vendaRef = push(ref(db, "vendas"));
 
@@ -918,17 +1176,12 @@ function configurarVenda(data, produtos, clientes, currentRender) {
       };
 
 
-      // ==================================
-      // GRAVAÇÃO CONJUNTA
-      // VENDA + CAIXA + PROMISSÓRIA
-      // ==================================
+      // GRAVAÇÃO CONJUNTA: VENDA + CAIXA + PROMISSÓRIA
 
       const atualizacoes = {};
 
       atualizacoes[`vendas/${vendaId}`] = venda;
 
-
-      // Entradas de dinheiro efetivamente recebido
 
       pagamentos
         .filter(p => p.metodo !== "Promissória")
@@ -960,8 +1213,6 @@ function configurarVenda(data, produtos, clientes, currentRender) {
 
         });
 
-
-      // Valor a receber em promissória
 
       if (valorPendente > 0) {
 
@@ -1001,7 +1252,7 @@ function configurarVenda(data, produtos, clientes, currentRender) {
 
       } catch (err) {
 
-        // Se a gravação falhar, devolver o estoque.
+        // Devolver estoque se a gravação da venda falhar.
 
         await runTransaction(
 
@@ -1018,8 +1269,6 @@ function configurarVenda(data, produtos, clientes, currentRender) {
           }
 
         );
-
-        estoqueBaixado = false;
 
         throw err;
 
@@ -1042,14 +1291,12 @@ function configurarVenda(data, produtos, clientes, currentRender) {
 
       alert("Erro ao registrar venda: " + err.message);
 
-      // Não realizar nova baixa nem devolução aqui.
-      // A devolução já é feita no bloco de gravação conjunta.
-
     } finally {
 
       if (button.isConnected) {
 
         button.disabled = false;
+
         button.innerHTML =
           '<i class="fa-solid fa-floppy-disk"></i> Registrar venda';
 
@@ -1060,9 +1307,7 @@ function configurarVenda(data, produtos, clientes, currentRender) {
   });
 
 
-  // ==================================
   // EXCLUIR VENDA
-  // ==================================
 
   content.querySelectorAll("[data-delete]").forEach(button => {
 
@@ -1116,9 +1361,7 @@ async function render() {
 
   try {
 
-    // ==================================
     // DASHBOARD
-    // ==================================
 
     if (currentPage === "dashboard") {
 
@@ -1129,9 +1372,7 @@ async function render() {
     }
 
 
-    // ==================================
     // OUTROS MÓDULOS
-    // ==================================
 
     const cfg = configs[currentPage];
 
@@ -1141,7 +1382,21 @@ async function render() {
 
     let produtos = [];
     let clientes = [];
+    let movimentacoes = [];
 
+
+    // CARREGAR PRODUTOS E HISTÓRICO DE ESTOQUE
+
+    if (currentPage === "produtos") {
+
+      produtos = data;
+
+      movimentacoes = await getRows("movimentacoes_estoque");
+
+    }
+
+
+    // CARREGAR DADOS DAS VENDAS
 
     if (currentPage === "vendas") {
 
@@ -1162,9 +1417,7 @@ async function render() {
     ) return;
 
 
-    // ==================================
     // CONSTRUIR FORMULÁRIOS
-    // ==================================
 
     const fields = cfg.fields.map(([k, l, t]) => {
 
@@ -1315,9 +1568,7 @@ async function render() {
     }).join("");
 
 
-    // ==================================
-    // TABELA
-    // ==================================
+    // TABELA PRINCIPAL
 
     const tabela = data.map(r => `
 
@@ -1359,6 +1610,20 @@ async function render() {
 
           <div class="actions">
 
+            ${
+              currentPage === "produtos"
+                ? `
+                  <button
+                    type="button"
+                    data-stock-move="${esc(r.id)}"
+                  >
+                    <i class="fa-solid fa-arrows-rotate"></i>
+                    Movimentar
+                  </button>
+                `
+                : ""
+            }
+
             <button
               class="danger"
               data-delete="${esc(r.id)}"
@@ -1379,9 +1644,7 @@ async function render() {
     `).join("");
 
 
-    // ==================================
     // TELA
-    // ==================================
 
     content.innerHTML = `
 
@@ -1458,6 +1721,169 @@ async function render() {
       </div>
 
 
+      ${
+        currentPage === "produtos"
+          ? `
+
+            <div class="panel">
+
+              <h3>Movimentar estoque</h3>
+
+              <p class="muted">
+                Registre entradas e baixas de produtos já cadastrados.
+              </p>
+
+              <form id="movementForm" class="form-grid">
+
+                <label>
+                  Produto
+
+                  <select id="movementProduct" required>
+
+                    <option value="">Selecione um produto</option>
+
+                    ${produtos.map(p => `
+
+                      <option value="${esc(p.id)}">
+
+                        ${esc(p.nome)}
+                        - Estoque atual: ${esc(p.quantidade)}
+
+                      </option>
+
+                    `).join("")}
+
+                  </select>
+
+                </label>
+
+
+                <label>
+                  Operação
+
+                  <select id="movementType" required>
+
+                    <option value="Entrada">Entrada de estoque</option>
+                    <option value="Baixa">Baixa de estoque</option>
+
+                  </select>
+
+                </label>
+
+
+                <label>
+                  Quantidade
+
+                  <input
+                    id="movementQuantity"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    placeholder="Informe a quantidade"
+                    required
+                  >
+
+                </label>
+
+
+                <label>
+                  Motivo da movimentação
+
+                  <input
+                    id="movementReason"
+                    type="text"
+                    placeholder="Ex.: Compra, reposição, perda, uso..."
+                    required
+                  >
+
+                </label>
+
+
+                <button type="submit">
+
+                  <i class="fa-solid fa-arrows-rotate"></i>
+                  Registrar movimentação
+
+                </button>
+
+              </form>
+
+            </div>
+
+
+            <div class="panel">
+
+              <h3>Histórico de movimentações</h3>
+
+              <div class="table-wrap">
+
+                <table>
+
+                  <thead>
+
+                    <tr>
+                      <th>Data</th>
+                      <th>Produto</th>
+                      <th>Operação</th>
+                      <th>Quantidade</th>
+                      <th>Saldo anterior</th>
+                      <th>Saldo atual</th>
+                      <th>Motivo</th>
+                      <th>Usuário</th>
+                    </tr>
+
+                  </thead>
+
+                  <tbody>
+
+                    ${
+                      [...movimentacoes]
+                        .reverse()
+                        .map(m => `
+
+                          <tr>
+
+                            <td>${esc(m.data)}</td>
+
+                            <td>${esc(m.produtoNome)}</td>
+
+                            <td>${esc(m.tipo)}</td>
+
+                            <td>${esc(m.quantidade)}</td>
+
+                            <td>${esc(m.saldoAnterior)}</td>
+
+                            <td>${esc(m.saldoNovo)}</td>
+
+                            <td>${esc(m.motivo)}</td>
+
+                            <td>${esc(m.usuario)}</td>
+
+                          </tr>
+
+                        `).join("")
+                      || `
+                        <tr>
+                          <td class="empty" colspan="8">
+                            Nenhuma movimentação registrada.
+                          </td>
+                        </tr>
+                      `
+                    }
+
+                  </tbody>
+
+                </table>
+
+              </div>
+
+            </div>
+
+          `
+          : ""
+      }
+
+
       <div class="table-wrap">
 
         <table>
@@ -1497,6 +1923,17 @@ async function render() {
       </div>
 
     `;
+
+
+    // ==================================
+    // ESTOQUE
+    // ==================================
+
+    if (currentPage === "produtos") {
+
+      configurarEstoque(produtos);
+
+    }
 
 
     // ==================================
