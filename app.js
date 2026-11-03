@@ -1,4 +1,3 @@
-```javascript
 // ======================================
 // FIREBASE - IMPORTAÇÕES
 // ======================================
@@ -224,7 +223,7 @@ async function render() {
   try {
 
     // ==================================
-    // PAINEL PRINCIPAL
+    // PAINEL PRINCIPAL (DASHBOARD)
     // ==================================
 
     if (page === "dashboard") {
@@ -268,18 +267,11 @@ async function render() {
         </div>
       `;
 
-    }
-
-  } catch (error) {
-    console.error("Erro ao renderizar dashboard:", error);
-  }
-}
-
-      return;
+      return; // Encerra a renderização aqui se for o dashboard
     }
 
     // ==================================
-    // CONFIGURAÇÃO DA PÁGINA
+    // CONFIGURAÇÃO DA PÁGINA (OUTROS MÓDULOS)
     // ==================================
 
     const cfg = configs[page];
@@ -672,4 +664,3 @@ function metric(t, v) {
   `;
 
 }
-```
