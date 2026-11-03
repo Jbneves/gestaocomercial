@@ -1,3 +1,4 @@
+
 // ======================================
 // FIREBASE - IMPORTAÇÕES
 // ======================================
@@ -114,6 +115,12 @@ const configs = {
       ["valor", "Valor", "number"],
       ["data", "Data", "date"]
     ]
+  },
+
+  // NOVO MÓDULO
+  empresa: {
+    title: "Dados da empresa",
+    fields: []
   }
 
 };
@@ -188,6 +195,390 @@ function hoje() {
 function dinheiroEmCentavos(valor) {
 
   return Math.round((Number(valor) + Number.EPSILON) * 100);
+
+}
+
+
+// ======================================
+// CADASTRO DOS DADOS DA EMPRESA
+// ======================================
+
+async function renderEmpresa(currentRender) {
+
+  const snapshot = await get(ref(db, "empresa"));
+
+  if (
+    currentRender !== renderVersion ||
+    !authenticated ||
+    page !== "empresa"
+  ) return;
+
+  const empresa = snapshot.exists()
+    ? snapshot.val()
+    : {};
+
+  content.innerHTML = `
+
+    <div class="toolbar">
+
+      <div>
+
+        <h2>Dados da empresa</h2>
+
+        <span class="muted">
+          Informações que poderão aparecer nos comprovantes de venda.
+        </span>
+
+      </div>
+
+    </div>
+
+
+    <div class="panel">
+
+      <form id="empresaForm" class="form-grid">
+
+        <label>
+          Nome fantasia
+
+          <input
+            name="fantasia"
+            value="${esc(empresa.fantasia || "")}"
+            placeholder="Nome comercial da empresa"
+            required
+          >
+
+        </label>
+
+
+        <label>
+          Razão social
+
+          <input
+            name="razaoSocial"
+            value="${esc(empresa.razaoSocial || "")}"
+            placeholder="Razão social"
+          >
+
+        </label>
+
+
+        <label>
+          CPF/CNPJ
+
+          <input
+            name="documento"
+            value="${esc(empresa.documento || "")}"
+            placeholder="CPF ou CNPJ"
+          >
+
+        </label>
+
+
+        <label>
+          Telefone
+
+          <input
+            name="telefone"
+            value="${esc(empresa.telefone || "")}"
+            placeholder="Telefone"
+          >
+
+        </label>
+
+
+        <label>
+          WhatsApp
+
+          <input
+            name="whatsapp"
+            value="${esc(empresa.whatsapp || "")}"
+            placeholder="WhatsApp"
+          >
+
+        </label>
+
+
+        <label>
+          E-mail
+
+          <input
+            name="email"
+            type="email"
+            value="${esc(empresa.email || "")}"
+            placeholder="E-mail comercial"
+          >
+
+        </label>
+
+
+        <label style="grid-column:1/-1">
+
+          Endereço completo
+
+          <input
+            name="endereco"
+            value="${esc(empresa.endereco || "")}"
+            placeholder="Rua, número, bairro, cidade e CEP"
+          >
+
+        </label>
+
+
+        <div style="grid-column:1/-1">
+
+          <h3>Logo da empresa</h3>
+
+          <p class="muted">
+            Escolha uma imagem PNG ou JPG. O sistema reduzirá
+            automaticamente o tamanho antes de salvar.
+          </p>
+
+
+          <input
+            type="file"
+            id="empresaLogo"
+            accept="image/png,image/jpeg"
+          >
+
+
+          <div style="margin-top:15px">
+
+            <img
+              id="empresaLogoPreview"
+              src="${esc(empresa.logo || "")}"
+              alt="Logo da empresa"
+              style="
+                ${empresa.logo ? "" : "display:none;"}
+                max-width:220px;
+                max-height:120px;
+                object-fit:contain;
+                border:1px solid #ddd;
+                padding:10px;
+                border-radius:8px;
+              "
+            >
+
+          </div>
+
+        </div>
+
+
+        <button type="submit">
+
+          <i class="fa-solid fa-floppy-disk"></i>
+          Salvar dados da empresa
+
+        </button>
+
+      </form>
+
+    </div>
+
+  `;
+
+
+  const form = $("#empresaForm");
+  const logoInput = $("#empresaLogo");
+  const preview = $("#empresaLogoPreview");
+
+  let logoAtual = empresa.logo || "";
+
+
+  // ==================================
+  // PRÉ-VISUALIZAÇÃO E REDUÇÃO DA LOGO
+  // ==================================
+
+  logoInput.addEventListener("change", async () => {
+
+    const arquivo = logoInput.files[0];
+
+    if (!arquivo) return;
+
+    if (!["image/png", "image/jpeg"].includes(arquivo.type)) {
+
+      alert("Selecione uma imagem PNG ou JPG.");
+
+      logoInput.value = "";
+
+      return;
+
+    }
+
+    let url = null;
+
+    try {
+
+      const imagem = new Image();
+
+      url = URL.createObjectURL(arquivo);
+
+      await new Promise((resolve, reject) => {
+
+        imagem.onload = resolve;
+        imagem.onerror = reject;
+
+        imagem.src = url;
+
+      });
+
+
+      // Limitar maior dimensão a 500 pixels.
+
+      const limite = 500;
+
+      const escala = Math.min(
+        1,
+        limite / Math.max(imagem.width, imagem.height)
+      );
+
+
+      const canvas = document.createElement("canvas");
+
+      canvas.width = Math.max(
+        1,
+        Math.round(imagem.width * escala)
+      );
+
+      canvas.height = Math.max(
+        1,
+        Math.round(imagem.height * escala)
+      );
+
+
+      const contexto = canvas.getContext("2d");
+
+      contexto.fillStyle = "#ffffff";
+
+      contexto.fillRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
+
+
+      contexto.drawImage(
+        imagem,
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
+
+
+      // Converter para JPEG e reduzir o tamanho.
+
+      const logoReduzida = canvas.toDataURL(
+        "image/jpeg",
+        0.75
+      );
+
+
+      const tamanhoBytes = Math.ceil(
+        (logoReduzida.length - "data:image/jpeg;base64,".length) * 3 / 4
+      );
+
+
+      if (tamanhoBytes > 300 * 1024) {
+
+        throw new Error(
+          "A logo ainda ficou muito grande. Escolha uma imagem menor."
+        );
+
+      }
+
+
+      logoAtual = logoReduzida;
+
+      preview.src = logoAtual;
+
+      preview.style.display = "block";
+
+
+    } catch (err) {
+
+      console.error("Erro ao processar logo:", err);
+
+      alert("Erro ao processar a logo: " + err.message);
+
+      logoInput.value = "";
+
+    } finally {
+
+      if (url) {
+        URL.revokeObjectURL(url);
+      }
+
+    }
+
+  });
+
+
+  // ==================================
+  // SALVAR DADOS DA EMPRESA
+  // ==================================
+
+  form.addEventListener("submit", async e => {
+
+    e.preventDefault();
+
+    const button = form.querySelector('button[type="submit"]');
+
+    button.disabled = true;
+    button.textContent = "Salvando...";
+
+    try {
+
+      const fd = new FormData(form);
+
+      const dados = Object.fromEntries(fd.entries());
+
+
+      await set(ref(db, "empresa"), {
+
+        fantasia: dados.fantasia.trim(),
+
+        razaoSocial: dados.razaoSocial.trim(),
+
+        documento: dados.documento.trim(),
+
+        telefone: dados.telefone.trim(),
+
+        whatsapp: dados.whatsapp.trim(),
+
+        email: dados.email.trim(),
+
+        endereco: dados.endereco.trim(),
+
+        logo: logoAtual,
+
+        atualizadoPor: user.uid,
+
+        atualizadoEm: serverTimestamp()
+
+      });
+
+
+      alert("Dados da empresa salvos com sucesso!");
+
+      await render();
+
+
+    } catch (err) {
+
+      console.error("Erro ao salvar empresa:", err);
+
+      alert("Erro ao salvar os dados: " + err.message);
+
+      button.disabled = false;
+
+      button.innerHTML =
+        '<i class="fa-solid fa-floppy-disk"></i> Salvar dados da empresa';
+
+    }
+
+  });
 
 }
 
@@ -281,16 +672,12 @@ function configurarEstoque(produtos) {
     button.textContent = "Processando...";
 
 
-    // Variáveis que também precisam estar acessíveis no catch.
-
     let quantidadeRef = null;
     let movimentacaoRealizada = false;
 
     try {
 
-      // ==================================
       // BUSCAR PRODUTO NO FIREBASE
-      // ==================================
 
       const produtoRef = ref(
         db,
@@ -306,9 +693,7 @@ function configurarEstoque(produtos) {
       const produtoAtual = produtoSnapshot.val();
 
 
-      // ==================================
       // VALIDAR ESTOQUE ATUAL
-      // ==================================
 
       const estoqueInicial = Number(
         produtoAtual.quantidade ?? 0
@@ -322,12 +707,7 @@ function configurarEstoque(produtos) {
       }
 
 
-      // ==================================
       // ATUALIZAR SOMENTE A QUANTIDADE
-      // ==================================
-
-      // A transação será feita no campo quantidade,
-      // sem substituir ou modificar os outros dados do produto.
 
       quantidadeRef = ref(
         db,
@@ -354,8 +734,6 @@ function configurarEstoque(produtos) {
           }
 
 
-          // Impedir baixa maior que o estoque disponível.
-
           if (
             tipo === "Baixa" &&
             estoqueAtual < quantidade
@@ -376,9 +754,7 @@ function configurarEstoque(produtos) {
       );
 
 
-      // ==================================
       // VERIFICAR RESULTADO DA TRANSAÇÃO
-      // ==================================
 
       if (!resultado.committed) {
 
@@ -411,9 +787,7 @@ function configurarEstoque(produtos) {
       movimentacaoRealizada = true;
 
 
-      // ==================================
       // CALCULAR SALDOS
-      // ==================================
 
       const saldoNovo = Number(
         resultado.snapshot.val()
@@ -424,9 +798,7 @@ function configurarEstoque(produtos) {
         : saldoNovo + quantidade;
 
 
-      // ==================================
       // REGISTRAR HISTÓRICO
-      // ==================================
 
       const historicoRef = push(
         ref(db, "movimentacoes_estoque")
@@ -460,9 +832,7 @@ function configurarEstoque(produtos) {
       });
 
 
-      // ==================================
       // SUCESSO
-      // ==================================
 
       alert(
         "Movimentação registrada com sucesso!\n\n" +
@@ -482,12 +852,7 @@ function configurarEstoque(produtos) {
       console.error("Erro na movimentação:", err);
 
 
-      // ==================================
       // RESTAURAR ESTOQUE SE NECESSÁRIO
-      // ==================================
-
-      // Se a quantidade foi alterada, mas o histórico
-      // não foi salvo, tentar desfazer a movimentação.
 
       if (movimentacaoRealizada && quantidadeRef) {
 
@@ -1493,6 +1858,20 @@ async function render() {
 
     if (!cfg) return;
 
+
+    // ==================================
+    // TELA DE DADOS DA EMPRESA
+    // ==================================
+
+    if (currentPage === "empresa") {
+
+      await renderEmpresa(currentRender);
+
+      return;
+
+    }
+
+
     const data = await getRows(currentPage);
 
     let produtos = [];
@@ -2040,9 +2419,7 @@ async function render() {
     `;
 
 
-    // ==================================
     // ESTOQUE
-    // ==================================
 
     if (currentPage === "produtos") {
 
@@ -2051,9 +2428,7 @@ async function render() {
     }
 
 
-    // ==================================
     // VENDAS
-    // ==================================
 
     if (currentPage === "vendas") {
 
@@ -2064,9 +2439,7 @@ async function render() {
     }
 
 
-    // ==================================
     // SALVAR OUTROS REGISTROS
-    // ==================================
 
     $("#recordForm").addEventListener("submit", async e => {
 
@@ -2139,9 +2512,7 @@ async function render() {
     });
 
 
-    // ==================================
     // EXCLUIR OUTROS REGISTROS
-    // ==================================
 
     content.querySelectorAll("[data-delete]").forEach(button => {
 
