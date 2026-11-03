@@ -1005,38 +1005,26 @@ async function render() {
 
           } catch (err) {
 
-            // DEVOLVER ESTOQUE SE A GRAVAÇÃO FALHAR
+// DEVOLVER ESTOQUE SE A GRAVAÇÃO FALHAR
 
-            await runTransaction(
+await runTransaction(
 
-              stockRef,
+  stockRef,
 
-              current => {
+  current => {
 
-  console.log("VALOR RECEBIDO PELA TRANSAÇÃO:", {
-    current,
-    tipo: typeof current,
-    quantidade,
-    currentNumber: Number(current),
-    comparacao: Number(current) < quantidade
-  });
+    if (
+      current === null ||
+      current === undefined
+    ) {
+      return;
+    }
 
-  if (
-    current === null ||
-    current === undefined
-  ) {
-    return;
+    return Number(current) + quantidade;
+
   }
 
-                  return;
-
-                }
-
-                return Number(current) + quantidade;
-
-              }
-
-            );
+);
 
             throw err;
 
