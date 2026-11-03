@@ -285,6 +285,7 @@ async function buscarDadosEmpresa() {
 }
 
 
+
 function montarComprovanteHTML(venda, empresa = {}) {
 
   const pagamentos = Array.isArray(venda.pagamentos)
@@ -292,60 +293,55 @@ function montarComprovanteHTML(venda, empresa = {}) {
     : [];
 
   const pagamentosHTML = pagamentos.length
-
     ? pagamentos.map(p => `
         <tr>
           <td>${esc(p.metodo)}</td>
-          <td style="text-align:right">${brl(p.valor)}</td>
+          <td class="valor">${brl(p.valor)}</td>
         </tr>
       `).join("")
-
     : `
         <tr>
           <td colspan="2">Forma de pagamento não informada</td>
         </tr>
       `;
 
-
   const logoHTML = empresa.logo
-
     ? `
-        <img
-          src="${esc(empresa.logo)}"
-          style="
-            max-width:150px;
-            max-height:90px;
-            object-fit:contain;
-            margin-bottom:12px;
-          "
-        >
+        <div class="logo-area">
+          <img src="${esc(empresa.logo)}" alt="Logo da empresa">
+        </div>
       `
-
-    : "";
-
+    : `
+        <div class="logo-area sem-logo">
+          <strong>${esc(empresa.fantasia || "EMPRESA")}</strong>
+        </div>
+      `;
 
   const dadosEmpresa = [
-
-    empresa.razaoSocial,
-
-    empresa.documento
-      ? `CPF/CNPJ: ${empresa.documento}`
+    empresa.razaoSocial
+      ? `<p><strong>Razão social:</strong> ${esc(empresa.razaoSocial)}</p>`
       : "",
 
-    empresa.endereco,
+    empresa.documento
+      ? `<p><strong>CPF/CNPJ:</strong> ${esc(empresa.documento)}</p>`
+      : "",
 
     empresa.telefone
-      ? `Telefone: ${empresa.telefone}`
+      ? `<p><strong>Telefone:</strong> ${esc(empresa.telefone)}</p>`
       : "",
 
     empresa.whatsapp
-      ? `WhatsApp: ${empresa.whatsapp}`
+      ? `<p><strong>WhatsApp:</strong> ${esc(empresa.whatsapp)}</p>`
       : "",
 
     empresa.email
+      ? `<p><strong>E-mail:</strong> ${esc(empresa.email)}</p>`
+      : "",
 
+    empresa.endereco
+      ? `<p><strong>Endereço:</strong> ${esc(empresa.endereco)}</p>`
+      : ""
   ].filter(Boolean);
-
 
   return `
 
@@ -354,98 +350,169 @@ function montarComprovanteHTML(venda, empresa = {}) {
       <style>
 
         .comprovante-venda {
-          font-family:Arial,Helvetica,sans-serif;
-          color:#222;
-          background:#fff;
-          width:100%;
-          box-sizing:border-box;
-          padding:25px;
-          font-size:13px;
+          font-family: Arial, Helvetica, sans-serif;
+          color: #222;
+          background: #fff;
+          width: 100%;
+          box-sizing: border-box;
+          padding: 0;
+          font-size: 12px;
+          line-height: 1.4;
         }
 
         .comprovante-venda * {
-          box-sizing:border-box;
+          box-sizing: border-box;
         }
 
-        .comprovante-venda .cabecalho {
-          text-align:center;
-          border-bottom:2px solid #333;
-          padding-bottom:18px;
-          margin-bottom:20px;
+        .cabecalho {
+          display: flex;
+          align-items: center;
+          gap: 20px;
+          border-bottom: 2px solid #333;
+          padding: 0 0 13px;
+          margin-bottom: 16px;
         }
 
-        .comprovante-venda h1 {
-          font-size:23px;
-          margin:5px 0 10px;
+        .logo-area {
+          width: 125px;
+          min-width: 125px;
+          height: 90px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
 
-        .comprovante-venda h2 {
-          font-size:17px;
-          margin:22px 0 10px;
+        .logo-area img {
+          max-width: 120px;
+          max-height: 85px;
+          object-fit: contain;
         }
 
-        .comprovante-venda p {
-          margin:5px 0;
-          line-height:1.5;
+        .sem-logo {
+          border: 1px solid #ddd;
+          text-align: center;
+          padding: 8px;
         }
 
-        .comprovante-venda .titulo {
-          text-align:center;
-          font-size:19px;
-          font-weight:bold;
-          margin:22px 0;
+        .empresa-info {
+          flex: 1;
+          min-width: 0;
         }
 
-        .comprovante-venda .dados {
-          margin-bottom:18px;
-          line-height:1.7;
+        .empresa-info h1 {
+          font-size: 20px;
+          margin: 0 0 7px;
+          color: #222;
         }
 
-        .comprovante-venda table {
-          width:100%;
-          border-collapse:collapse;
-          margin-top:10px;
+        .empresa-dados {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 3px 15px;
         }
 
-        .comprovante-venda th,
-        .comprovante-venda td {
-          border:1px solid #ccc;
-          padding:10px;
-          text-align:left;
+        .empresa-dados p {
+          margin: 0;
+          overflow-wrap: anywhere;
         }
 
-        .comprovante-venda th {
-          background:#f0f0f0;
+        .titulo {
+          text-align: center;
+          font-size: 18px;
+          font-weight: bold;
+          margin: 14px 0 15px;
+          padding: 9px;
+          background: #f1f1f1;
+          border: 1px solid #ddd;
         }
 
-        .comprovante-venda .totais {
-          margin-top:20px;
-          border-top:1px solid #ccc;
-          padding-top:12px;
+        .dados-venda {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 8px 20px;
+          border: 1px solid #ddd;
+          padding: 12px;
+          margin-bottom: 17px;
         }
 
-        .comprovante-venda .total-geral {
-          font-size:19px;
-          font-weight:bold;
+        .dados-venda p {
+          margin: 0;
         }
 
-        .comprovante-venda .assinatura {
-          margin-top:65px;
-          text-align:center;
+        h2 {
+          font-size: 14px;
+          margin: 17px 0 7px;
         }
 
-        .comprovante-venda .assinatura span {
-          display:inline-block;
-          width:250px;
-          border-top:1px solid #333;
-          padding-top:8px;
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          margin-bottom: 15px;
         }
 
-        .comprovante-venda .rodape {
-          margin-top:35px;
-          text-align:center;
-          color:#555;
-          font-size:11px;
+        th, td {
+          border: 1px solid #ccc;
+          padding: 8px;
+          text-align: left;
+        }
+
+        th {
+          background: #eee;
+          font-weight: bold;
+        }
+
+        .valor {
+          text-align: right;
+          white-space: nowrap;
+        }
+
+        .totais {
+          width: 55%;
+          margin-left: auto;
+          border: 1px solid #ddd;
+          padding: 12px;
+        }
+
+        .totais p {
+          display: flex;
+          justify-content: space-between;
+          margin: 5px 0;
+        }
+
+        .total-geral {
+          font-size: 16px;
+          font-weight: bold;
+          border-bottom: 1px solid #ccc;
+          padding-bottom: 8px;
+          margin-bottom: 8px !important;
+        }
+
+        .assinatura {
+          margin-top: 48px;
+          text-align: center;
+        }
+
+        .assinatura span {
+          display: inline-block;
+          width: 240px;
+          border-top: 1px solid #333;
+          padding-top: 6px;
+        }
+
+        .rodape {
+          margin-top: 25px;
+          padding-top: 8px;
+          border-top: 1px solid #ddd;
+          text-align: center;
+          color: #666;
+          font-size: 10px;
+        }
+
+        @media print {
+          .comprovante-venda {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
         }
 
       </style>
@@ -455,11 +522,17 @@ function montarComprovanteHTML(venda, empresa = {}) {
 
         ${logoHTML}
 
-        <h1>${esc(empresa.fantasia || "EMPRESA")}</h1>
+        <div class="empresa-info">
 
-        ${dadosEmpresa.map(item => `
-          <p>${esc(item)}</p>
-        `).join("")}
+          <h1>${esc(empresa.fantasia || "EMPRESA")}</h1>
+
+          <div class="empresa-dados">
+
+            ${dadosEmpresa.join("")}
+
+          </div>
+
+        </div>
 
       </div>
 
@@ -469,7 +542,7 @@ function montarComprovanteHTML(venda, empresa = {}) {
       </div>
 
 
-      <div class="dados">
+      <div class="dados-venda">
 
         <p>
           <strong>Número da venda:</strong>
@@ -526,7 +599,7 @@ function montarComprovanteHTML(venda, empresa = {}) {
         <thead>
           <tr>
             <th>Forma de pagamento</th>
-            <th style="text-align:right">Valor</th>
+            <th class="valor">Valor</th>
           </tr>
         </thead>
 
@@ -540,15 +613,18 @@ function montarComprovanteHTML(venda, empresa = {}) {
       <div class="totais">
 
         <p class="total-geral">
-          Total da venda: ${brl(venda.valor)}
+          <span>Total da venda:</span>
+          <span>${brl(venda.valor)}</span>
         </p>
 
         <p>
-          Valor recebido: ${brl(venda.valorRecebido)}
+          <span>Valor recebido:</span>
+          <strong>${brl(venda.valorRecebido)}</strong>
         </p>
 
         <p>
-          Valor pendente: ${brl(venda.valorPendente)}
+          <span>Valor pendente:</span>
+          <strong>${brl(venda.valorPendente)}</strong>
         </p>
 
       </div>
@@ -560,14 +636,14 @@ function montarComprovanteHTML(venda, empresa = {}) {
 
 
       <div class="rodape">
-        <p>${esc(empresa.fantasia || "Comprovante de venda")}</p>
-        <p>Documento gerado pelo sistema de Gestão Comercial.</p>
+        ${esc(empresa.fantasia || "Comprovante de venda")}
+        <br>
+        Documento gerado pelo sistema de Gestão Comercial.
       </div>
 
     </div>
 
   `;
-
 }
 
 
