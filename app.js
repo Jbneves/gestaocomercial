@@ -1013,10 +1013,20 @@ async function render() {
 
               current => {
 
-                if (
-                  current === null ||
-                  current === undefined
-                ) {
+  console.log("VALOR RECEBIDO PELA TRANSAÇÃO:", {
+    current,
+    tipo: typeof current,
+    quantidade,
+    currentNumber: Number(current),
+    comparacao: Number(current) < quantidade
+  });
+
+  if (
+    current === null ||
+    current === undefined
+  ) {
+    return;
+  }
 
                   return;
 
