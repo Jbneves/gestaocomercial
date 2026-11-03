@@ -15,6 +15,7 @@ import {
   set,
   push,
   remove,
+  update,
   runTransaction,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
@@ -36,11 +37,7 @@ const sidebar = $("#sidebar");
 
 let page = "dashboard";
 let user = null;
-
-// Controle das renderizações simultâneas
 let renderVersion = 0;
-
-// Evita operações durante a troca de autenticação
 let authenticated = false;
 
 
@@ -75,12 +72,12 @@ const configs = {
   vendas: {
     title: "Vendas",
     fields: [
-      ["cliente", "Cliente"],
-      ["produtoId", "Produto"],
-      ["quantidade", "Quantidade vendida", "number"],
-      ["valor", "Valor total", "number"],
-      ["forma", "Forma de pagamento"],
-      ["status", "Status"]
+      ["clienteNome", "Cliente"],
+      ["produtoNome", "Produto"],
+      ["quantidade", "Quantidade", "number"],
+      ["valor", "Total", "number"],
+      ["valorRecebido", "Recebido", "number"],
+      ["valorPendente", "A receber", "number"]
     ]
   },
 
@@ -124,6 +121,79 @@ const configs = {
 
 
 // ======================================
+// FUNÇÕES AUXILIARES
+// ======================================
+
+async function getRows(name) {
+
+  const snapshot = await get(ref(db, name));
+
+  if (!snapshot.exists()) return [];
+
+  const data = snapshot.val();
+
+  return Object.entries(data).map(([id, value]) => ({
+    id,
+    ...value
+  }));
+
+}
+
+
+const brl = v =>
+
+  (Number(v) || 0).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL"
+  });
+
+
+function esc(s) {
+
+  return String(s ?? "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[c]));
+
+}
+
+
+function metric(t, v) {
+
+  return `
+    <div class="metric">
+      <span>${esc(t)}</span>
+      <strong>${esc(v)}</strong>
+    </div>
+  `;
+
+}
+
+
+function hoje() {
+
+  const d = new Date();
+
+  const ano = d.getFullYear();
+  const mes = String(d.getMonth() + 1).padStart(2, "0");
+  const dia = String(d.getDate()).padStart(2, "0");
+
+  return `${ano}-${mes}-${dia}`;
+
+}
+
+
+function dinheiroEmCentavos(valor) {
+
+  return Math.round((Number(valor) + Number.EPSILON) * 100);
+
+}
+
+
+// ======================================
 // NAVEGAÇÃO
 // ======================================
 
@@ -131,13 +201,10 @@ function setPage(newPage) {
 
   if (!authenticated) return;
 
-  if (newPage !== "dashboard" && !configs[newPage]) {
-    return;
-  }
+  if (newPage !== "dashboard" && !configs[newPage]) return;
 
   page = newPage;
 
-  // Atualizar botão selecionado
   menu.querySelectorAll("button[data-page]").forEach(button => {
 
     button.classList.toggle(
@@ -147,24 +214,17 @@ function setPage(newPage) {
 
   });
 
-  // Fechar menu no celular
   sidebar.classList.remove("open");
 
-  // Voltar ao topo
   window.scrollTo({
     top: 0,
-    behavior: "instant"
+    behavior: "auto"
   });
 
-  // Carregar página
   render();
 
 }
 
-
-// ======================================
-// MENU LATERAL
-// ======================================
 
 menu.addEventListener("click", e => {
 
@@ -177,20 +237,12 @@ menu.addEventListener("click", e => {
 });
 
 
-// ======================================
-// BOTÃO ABRIR / FECHAR MENU
-// ======================================
-
 $("#menuToggle").addEventListener("click", () => {
 
   sidebar.classList.toggle("open");
 
 });
 
-
-// ======================================
-// FECHAR MENU AO CLICAR FORA
-// ======================================
 
 document.addEventListener("click", e => {
 
@@ -217,7 +269,6 @@ $("#loginForm").addEventListener("submit", async e => {
   e.preventDefault();
 
   const form = e.currentTarget;
-
   const button = form.querySelector('button[type="submit"]');
 
   const email = $("#email").value.trim();
@@ -230,11 +281,7 @@ $("#loginForm").addEventListener("submit", async e => {
 
   try {
 
-    await signInWithEmailAndPassword(
-      auth,
-      email,
-      password
-    );
+    await signInWithEmailAndPassword(auth, email, password);
 
   } catch (err) {
 
@@ -244,6 +291,7 @@ $("#loginForm").addEventListener("submit", async e => {
       "Falha no acesso. Confira e-mail e senha.";
 
     button.disabled = false;
+
     button.innerHTML =
       '<i class="fa-solid fa-right-to-bracket"></i> Entrar no sistema';
 
@@ -258,9 +306,7 @@ $("#loginForm").addEventListener("submit", async e => {
 
 $("#logout").addEventListener("click", async () => {
 
-  if (!confirm("Deseja realmente sair do sistema?")) {
-    return;
-  }
+  if (!confirm("Deseja realmente sair do sistema?")) return;
 
   try {
 
@@ -284,10 +330,8 @@ $("#logout").addEventListener("click", async () => {
 onAuthStateChanged(auth, async u => {
 
   user = u;
-
   authenticated = !!u;
 
-  // Invalidar renderizações anteriores
   renderVersion++;
 
   login.hidden = !!u;
@@ -297,7 +341,6 @@ onAuthStateChanged(auth, async u => {
 
     $("#userEmail").textContent = u.email || "";
 
-    // Iniciar sempre no painel
     page = "dashboard";
 
     menu.querySelectorAll("button[data-page]").forEach(button => {
@@ -320,7 +363,6 @@ onAuthStateChanged(auth, async u => {
     page = "dashboard";
 
     $("#loginError").textContent = "";
-
     $("#password").value = "";
 
     const button = $("#loginForm").querySelector(
@@ -338,79 +380,725 @@ onAuthStateChanged(auth, async u => {
 
 
 // ======================================
-// BUSCAR DADOS DO REALTIME DATABASE
+// RESUMO DO CAIXA
 // ======================================
 
-async function getRows(name) {
+async function renderDashboard(currentRender) {
 
-  const snapshot = await get(ref(db, name));
+  const [
+    clientes,
+    produtos,
+    vendas,
+    ordens,
+    caixa,
+    promissorias
+  ] = await Promise.all([
 
-  if (!snapshot.exists()) {
-    return [];
-  }
+    getRows("clientes"),
+    getRows("produtos"),
+    getRows("vendas"),
+    getRows("ordens"),
+    getRows("caixa"),
+    getRows("promissorias")
 
-  const data = snapshot.val();
+  ]);
 
-  return Object.entries(data).map(([id, value]) => ({
+  if (
+    currentRender !== renderVersion ||
+    !authenticated ||
+    page !== "dashboard"
+  ) return;
 
-    id,
-    ...value
+  const entradas = caixa
 
-  }));
+    .filter(x =>
+      String(x.tipo).toLowerCase().startsWith("ent")
+    )
+
+    .reduce((a, x) =>
+      a + (Number(x.valor) || 0), 0);
+
+
+  const saidas = caixa
+
+    .filter(x =>
+      String(x.tipo).toLowerCase().startsWith("sa")
+    )
+
+    .reduce((a, x) =>
+      a + (Number(x.valor) || 0), 0);
+
+
+  const aReceber = promissorias
+
+    .filter(x =>
+      !["paga", "pago", "quitada", "quitado"].includes(
+        String(x.status).toLowerCase()
+      )
+    )
+
+    .reduce((a, x) =>
+      a + (Number(x.valor) || 0), 0);
+
+
+  content.innerHTML = `
+
+    <div class="toolbar">
+      <div>
+        <h2>Visão geral</h2>
+        <span class="muted">Resumo dos registros</span>
+      </div>
+    </div>
+
+    <div class="grid">
+
+      ${metric("Clientes", clientes.length)}
+
+      ${metric("Produtos", produtos.length)}
+
+      ${metric("Vendas", vendas.length)}
+
+      ${metric("Ordens de serviço", ordens.length)}
+
+      ${metric("Entradas de caixa", brl(entradas))}
+
+      ${metric("Saídas de caixa", brl(saidas))}
+
+      ${metric("Saldo de caixa", brl(entradas - saidas))}
+
+      ${metric("Promissórias a receber", brl(aReceber))}
+
+    </div>
+
+    <div class="panel note">
+      <i class="fa-solid fa-circle-check"></i>
+      Sistema conectado ao Firebase Realtime Database.
+    </div>
+
+  `;
 
 }
 
 
 // ======================================
-// FORMATAÇÃO DE MOEDA
+// FORMULÁRIO DE PAGAMENTO
 // ======================================
 
-const brl = v =>
-
-  (Number(v) || 0).toLocaleString("pt-BR", {
-
-    style: "currency",
-    currency: "BRL"
-
-  });
-
-
-// ======================================
-// PROTEÇÃO CONTRA HTML
-// ======================================
-
-function esc(s) {
-
-  return String(s ?? "").replace(/[&<>"']/g, c => ({
-
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;"
-
-  }[c]));
-
-}
-
-
-// ======================================
-// MÉTRICAS DO PAINEL
-// ======================================
-
-function metric(t, v) {
+function paymentRow() {
 
   return `
 
-    <div class="metric">
+    <div class="payment-row form-grid"
+         style="margin-bottom:12px; padding:12px; border:1px solid #ddd; border-radius:8px;">
 
-      <span>${esc(t)}</span>
+      <label>
+        Forma de pagamento
 
-      <strong>${esc(v)}</strong>
+        <select class="payment-method" required>
+
+          <option value="Dinheiro">Dinheiro</option>
+          <option value="Pix">Pix</option>
+          <option value="Cartão de débito">Cartão de débito</option>
+          <option value="Cartão de crédito">Cartão de crédito</option>
+          <option value="Promissória">Promissória</option>
+
+        </select>
+      </label>
+
+      <label>
+        Valor
+
+        <input
+          class="payment-value"
+          type="number"
+          min="0.01"
+          step="0.01"
+          required
+          placeholder="0,00"
+        >
+      </label>
+
+      <button type="button" class="danger remove-payment">
+        <i class="fa-solid fa-trash"></i>
+        Remover
+      </button>
 
     </div>
 
   `;
+
+}
+
+
+// ======================================
+// TELA ESPECIAL DE VENDAS
+// ======================================
+
+function configurarVenda(data, produtos, clientes, currentRender) {
+
+  const form = $("#recordForm");
+
+  const productSelect = form.querySelector('[name="produtoId"]');
+  const customerSelect = form.querySelector('[name="clienteId"]');
+  const quantityInput = form.querySelector('[name="quantidade"]');
+  const priceInput = form.querySelector('[name="precoUnitario"]');
+  const totalInput = form.querySelector('[name="valor"]');
+
+  const paymentsContainer = $("#paymentsContainer");
+  const addPaymentButton = $("#addPayment");
+  const paymentSummary = $("#paymentSummary");
+  const dueDateWrap = $("#dueDateWrap");
+  const dueDateInput = $("#dueDate");
+
+  let paymentIndex = 0;
+
+
+  function atualizarPagamentos() {
+
+    const rows = [
+      ...paymentsContainer.querySelectorAll(".payment-row")
+    ];
+
+    let totalPagamentos = 0;
+    let totalRecebido = 0;
+    let totalPromissoria = 0;
+
+    let temPromissoria = false;
+
+    rows.forEach(row => {
+
+      const metodo = row.querySelector(".payment-method").value;
+
+      const valor = Number(
+        row.querySelector(".payment-value").value
+      ) || 0;
+
+      totalPagamentos += valor;
+
+      if (metodo === "Promissória") {
+
+        totalPromissoria += valor;
+        temPromissoria = true;
+
+      } else {
+
+        totalRecebido += valor;
+
+      }
+
+    });
+
+    dueDateWrap.hidden = !temPromissoria;
+    dueDateInput.required = temPromissoria;
+
+    const totalVenda = Number(totalInput.value) || 0;
+
+    const diferenca = totalVenda - totalPagamentos;
+
+    paymentSummary.innerHTML = `
+
+      <p>Total da venda: <strong>${brl(totalVenda)}</strong></p>
+
+      <p>Pagamentos informados: <strong>${brl(totalPagamentos)}</strong></p>
+
+      <p>Recebido agora: <strong>${brl(totalRecebido)}</strong></p>
+
+      <p>A receber: <strong>${brl(totalPromissoria)}</strong></p>
+
+      <p>
+        Diferença:
+        <strong>${brl(diferenca)}</strong>
+      </p>
+
+    `;
+
+  }
+
+
+  function atualizarTotal() {
+
+    const produto = produtos.find(
+      p => p.id === productSelect.value
+    );
+
+    const quantidade = Number(quantityInput.value) || 0;
+
+    const preco = produto
+      ? Number(produto.preco) || 0
+      : 0;
+
+    priceInput.value = preco.toFixed(2);
+
+    totalInput.value = (
+      Math.round(preco * quantidade * 100) / 100
+    ).toFixed(2);
+
+    const rows = paymentsContainer.querySelectorAll(".payment-row");
+
+    // Se houver apenas uma forma de pagamento,
+    // preencher automaticamente com o total da venda.
+    if (rows.length === 1) {
+
+      rows[0].querySelector(".payment-value").value =
+        totalInput.value;
+
+    }
+
+    atualizarPagamentos();
+
+  }
+
+
+  function adicionarPagamento() {
+
+    paymentIndex++;
+
+    paymentsContainer.insertAdjacentHTML(
+      "beforeend",
+      paymentRow()
+    );
+
+    atualizarPagamentos();
+
+  }
+
+
+  paymentsContainer.addEventListener("input", atualizarPagamentos);
+
+  paymentsContainer.addEventListener("change", atualizarPagamentos);
+
+
+  paymentsContainer.addEventListener("click", e => {
+
+    const button = e.target.closest(".remove-payment");
+
+    if (!button) return;
+
+    const rows = paymentsContainer.querySelectorAll(".payment-row");
+
+    if (rows.length <= 1) {
+
+      alert("A venda precisa ter pelo menos uma forma de pagamento.");
+      return;
+
+    }
+
+    button.closest(".payment-row").remove();
+
+    atualizarPagamentos();
+
+  });
+
+
+  addPaymentButton.addEventListener("click", adicionarPagamento);
+
+
+  productSelect.addEventListener("change", atualizarTotal);
+
+  quantityInput.addEventListener("input", atualizarTotal);
+
+
+  adicionarPagamento();
+
+
+  // ==================================
+  // SALVAR VENDA
+  // ==================================
+
+  form.addEventListener("submit", async e => {
+
+    e.preventDefault();
+
+    const button = form.querySelector('button[type="submit"]');
+
+    button.disabled = true;
+    button.textContent = "Registrando venda...";
+
+    let estoqueBaixado = false;
+    let stockRef = null;
+    let quantidade = 0;
+
+    try {
+
+      if (!customerSelect.value) {
+        throw new Error("Selecione um cliente.");
+      }
+
+      if (!productSelect.value) {
+        throw new Error("Selecione um produto.");
+      }
+
+      const cliente = clientes.find(
+        c => c.id === customerSelect.value
+      );
+
+      if (!cliente) {
+        throw new Error("Cliente não encontrado.");
+      }
+
+      const produtoRef = ref(
+        db,
+        `produtos/${productSelect.value}`
+      );
+
+      const produtoSnapshot = await get(produtoRef);
+
+      if (!produtoSnapshot.exists()) {
+        throw new Error("Produto não encontrado.");
+      }
+
+      const produto = produtoSnapshot.val();
+
+      quantidade = Number(quantityInput.value);
+
+      if (!Number.isFinite(quantidade) || quantidade <= 0) {
+        throw new Error("Informe uma quantidade válida.");
+      }
+
+      const precoUnitario = Number(produto.preco);
+
+      if (!Number.isFinite(precoUnitario) || precoUnitario < 0) {
+        throw new Error("Preço do produto inválido.");
+      }
+
+      const totalVenda = Math.round(
+        precoUnitario * quantidade * 100
+      ) / 100;
+
+      if (totalVenda <= 0) {
+        throw new Error("O total da venda precisa ser maior que zero.");
+      }
+
+      const pagamentos = [
+        ...paymentsContainer.querySelectorAll(".payment-row")
+      ].map(row => ({
+
+        metodo: row.querySelector(".payment-method").value,
+
+        valor: Number(
+          row.querySelector(".payment-value").value
+        )
+
+      }));
+
+
+      if (!pagamentos.length) {
+        throw new Error("Informe pelo menos uma forma de pagamento.");
+      }
+
+      if (pagamentos.some(p =>
+        !Number.isFinite(p.valor) || p.valor <= 0
+      )) {
+        throw new Error("Todos os pagamentos precisam ter valores maiores que zero.");
+      }
+
+
+      const somaPagamentosCentavos = pagamentos.reduce(
+        (total, p) => total + dinheiroEmCentavos(p.valor),
+        0
+      );
+
+      const totalVendaCentavos = dinheiroEmCentavos(totalVenda);
+
+      if (somaPagamentosCentavos !== totalVendaCentavos) {
+
+        throw new Error(
+          `A soma dos pagamentos (${brl(somaPagamentosCentavos / 100)}) ` +
+          `precisa ser igual ao total da venda (${brl(totalVenda)}).`
+        );
+
+      }
+
+
+      const valorRecebido = pagamentos
+
+        .filter(p => p.metodo !== "Promissória")
+
+        .reduce((total, p) => total + p.valor, 0);
+
+
+      const valorPendente = pagamentos
+
+        .filter(p => p.metodo === "Promissória")
+
+        .reduce((total, p) => total + p.valor, 0);
+
+
+      const vencimento = dueDateInput.value;
+
+      if (valorPendente > 0 && !vencimento) {
+        throw new Error("Informe o vencimento da promissória.");
+      }
+
+
+      // ==================================
+      // BAIXAR ESTOQUE COM TRANSAÇÃO
+      // ==================================
+
+      stockRef = ref(
+        db,
+        `produtos/${productSelect.value}/quantidade`
+      );
+
+      const transactionResult = await runTransaction(
+
+        stockRef,
+
+        current => {
+
+          const available = current === null
+            ? Number(produto.quantidade)
+            : Number(current);
+
+          if (
+            !Number.isFinite(available) ||
+            available < quantidade
+          ) {
+            return;
+          }
+
+          return available - quantidade;
+
+        }
+
+      );
+
+
+      if (!transactionResult.committed) {
+
+        const currentStock = (
+          await get(stockRef)
+        ).val();
+
+        throw new Error(
+          `Estoque insuficiente para ${produto.nome}. ` +
+          `Estoque atual: ${currentStock}.`
+        );
+
+      }
+
+      estoqueBaixado = true;
+
+
+      // ==================================
+      // PREPARAR GRAVAÇÃO DA VENDA
+      // ==================================
+
+      const vendaRef = push(ref(db, "vendas"));
+
+      const vendaId = vendaRef.key;
+
+      const statusVenda = valorPendente > 0
+        ? (valorRecebido > 0 ? "Parcial" : "Pendente")
+        : "Paga";
+
+
+      const venda = {
+
+        clienteId: cliente.id,
+        clienteNome: cliente.nome,
+
+        produtoId: productSelect.value,
+        produtoNome: produto.nome,
+
+        quantidade,
+        precoUnitario,
+        valor: totalVenda,
+
+        valorRecebido,
+        valorPendente,
+
+        pagamentos,
+
+        status: statusVenda,
+
+        criadoPor: user.uid,
+        criadoEm: serverTimestamp()
+
+      };
+
+
+      // ==================================
+      // GRAVAÇÃO CONJUNTA
+      // VENDA + CAIXA + PROMISSÓRIA
+      // ==================================
+
+      const atualizacoes = {};
+
+      atualizacoes[`vendas/${vendaId}`] = venda;
+
+
+      // Entradas de dinheiro efetivamente recebido
+
+      pagamentos
+        .filter(p => p.metodo !== "Promissória")
+        .forEach(p => {
+
+          const caixaRef = push(ref(db, "caixa"));
+
+          atualizacoes[`caixa/${caixaRef.key}`] = {
+
+            tipo: "Entrada",
+
+            descricao:
+              `Venda ${produto.nome} - ${cliente.nome} (${p.metodo})`,
+
+            categoria: "Venda",
+
+            valor: p.valor,
+
+            data: hoje(),
+
+            forma: p.metodo,
+
+            vendaId,
+
+            criadoPor: user.uid,
+            criadoEm: serverTimestamp()
+
+          };
+
+        });
+
+
+      // Valor a receber em promissória
+
+      if (valorPendente > 0) {
+
+        const promissoriaRef = push(
+          ref(db, "promissorias")
+        );
+
+        atualizacoes[`promissorias/${promissoriaRef.key}`] = {
+
+          cliente: cliente.nome,
+
+          clienteId: cliente.id,
+
+          numero: `VENDA-${vendaId.slice(-6).toUpperCase()}`,
+
+          valor: valorPendente,
+
+          emissao: hoje(),
+
+          vencimento,
+
+          status: "Pendente",
+
+          vendaId,
+
+          criadoPor: user.uid,
+          criadoEm: serverTimestamp()
+
+        };
+
+      }
+
+
+      try {
+
+        await update(ref(db), atualizacoes);
+
+      } catch (err) {
+
+        // Se a gravação falhar, devolver o estoque.
+
+        await runTransaction(
+
+          stockRef,
+
+          current => {
+
+            if (current === null || current === undefined) {
+              return;
+            }
+
+            return Number(current) + quantidade;
+
+          }
+
+        );
+
+        estoqueBaixado = false;
+
+        throw err;
+
+      }
+
+
+      alert(
+        "Venda registrada com sucesso!\n\n" +
+        `Total: ${brl(totalVenda)}\n` +
+        `Recebido: ${brl(valorRecebido)}\n` +
+        `A receber: ${brl(valorPendente)}`
+      );
+
+
+      await render();
+
+    } catch (err) {
+
+      console.error("Erro ao registrar venda:", err);
+
+      alert("Erro ao registrar venda: " + err.message);
+
+      // Não realizar nova baixa nem devolução aqui.
+      // A devolução já é feita no bloco de gravação conjunta.
+
+    } finally {
+
+      if (button.isConnected) {
+
+        button.disabled = false;
+        button.innerHTML =
+          '<i class="fa-solid fa-floppy-disk"></i> Registrar venda';
+
+      }
+
+    }
+
+  });
+
+
+  // ==================================
+  // EXCLUIR VENDA
+  // ==================================
+
+  content.querySelectorAll("[data-delete]").forEach(button => {
+
+    button.addEventListener("click", async () => {
+
+      if (!confirm(
+        "Deseja realmente excluir esta venda? O estoque não será devolvido automaticamente."
+      )) return;
+
+      try {
+
+        button.disabled = true;
+
+        await remove(
+          ref(db, `vendas/${button.dataset.delete}`)
+        );
+
+        alert(
+          "Venda excluída. Atenção: os lançamentos de caixa e promissórias relacionados não foram removidos."
+        );
+
+        await render();
+
+      } catch (err) {
+
+        console.error(err);
+
+        alert("Erro ao excluir: " + err.message);
+
+        button.disabled = false;
+
+      }
+
+    });
+
+  });
 
 }
 
@@ -423,112 +1111,18 @@ async function render() {
 
   if (!authenticated || !user) return;
 
-  // Identificador desta renderização
   const currentRender = ++renderVersion;
-
-  // Página solicitada nesta execução
   const currentPage = page;
 
   try {
 
     // ==================================
-    // PAINEL PRINCIPAL
+    // DASHBOARD
     // ==================================
 
     if (currentPage === "dashboard") {
 
-      const [
-        clientes,
-        produtos,
-        vendas,
-        ordens,
-        caixa
-      ] = await Promise.all([
-
-        getRows("clientes"),
-        getRows("produtos"),
-        getRows("vendas"),
-        getRows("ordens"),
-        getRows("caixa")
-
-      ]);
-
-      // Verificar se o usuário ainda está na mesma página
-      if (
-        currentRender !== renderVersion ||
-        !authenticated ||
-        currentPage !== page
-      ) {
-        return;
-      }
-
-      const entradas = caixa
-
-        .filter(x =>
-          String(x.tipo).toLowerCase().startsWith("ent")
-        )
-
-        .reduce((a, x) =>
-          a + (Number(x.valor) || 0), 0
-        );
-
-
-      const saidas = caixa
-
-        .filter(x =>
-          String(x.tipo).toLowerCase().startsWith("sa")
-        )
-
-        .reduce((a, x) =>
-          a + (Number(x.valor) || 0), 0
-        );
-
-
-      content.innerHTML = `
-
-        <div class="toolbar">
-
-          <div>
-
-            <h2>Visão geral</h2>
-
-            <span class="muted">
-              Resumo dos registros
-            </span>
-
-          </div>
-
-        </div>
-
-
-        <div class="grid">
-
-          ${metric("Clientes", clientes.length)}
-
-          ${metric("Produtos", produtos.length)}
-
-          ${metric("Vendas", vendas.length)}
-
-          ${metric("Ordens de serviço", ordens.length)}
-
-          ${metric("Entradas de caixa", brl(entradas))}
-
-          ${metric("Saídas de caixa", brl(saidas))}
-
-          ${metric("Saldo de caixa", brl(entradas - saidas))}
-
-        </div>
-
-
-        <div class="panel note">
-
-          <i class="fa-solid fa-circle-check"></i>
-
-          Sistema conectado ao Firebase Realtime Database.
-
-        </div>
-
-      `;
+      await renderDashboard(currentRender);
 
       return;
 
@@ -546,23 +1140,26 @@ async function render() {
     const data = await getRows(currentPage);
 
     let produtos = [];
+    let clientes = [];
 
 
     if (currentPage === "vendas") {
 
-      produtos = await getRows("produtos");
+      [produtos, clientes] = await Promise.all([
+
+        getRows("produtos"),
+        getRows("clientes")
+
+      ]);
 
     }
 
 
-    // Verificar se a página ainda é a mesma
     if (
       currentRender !== renderVersion ||
       !authenticated ||
       currentPage !== page
-    ) {
-      return;
-    }
+    ) return;
 
 
     // ==================================
@@ -571,40 +1168,129 @@ async function render() {
 
     const fields = cfg.fields.map(([k, l, t]) => {
 
-      // Seleção de produtos nas vendas
-      if (
-        currentPage === "vendas" &&
-        k === "produtoId"
-      ) {
+      if (currentPage === "vendas") {
 
-        return `
+        if (k === "clienteNome") {
 
-          <label>
+          return `
 
-            ${esc(l)}
+            <label>
+              Cliente
 
-            <select name="produtoId" required>
+              <select name="clienteId" required>
 
-              <option value="">
-                Selecione um produto
-              </option>
+                <option value="">Selecione um cliente</option>
 
-              ${produtos.map(p => `
+                ${clientes.map(c => `
 
-                <option value="${esc(p.id)}">
+                  <option value="${esc(c.id)}">
+                    ${esc(c.nome)}
+                  </option>
 
-                  ${esc(p.nome)}
-                  - Estoque: ${esc(p.quantidade)}
+                `).join("")}
 
-                </option>
+              </select>
 
-              `).join("")}
+            </label>
 
-            </select>
+          `;
 
-          </label>
+        }
 
-        `;
+
+        if (k === "produtoNome") {
+
+          return `
+
+            <label>
+              Produto
+
+              <select name="produtoId" required>
+
+                <option value="">Selecione um produto</option>
+
+                ${produtos.map(p => `
+
+                  <option
+                    value="${esc(p.id)}"
+                    ${Number(p.quantidade) <= 0 ? "disabled" : ""}
+                  >
+
+                    ${esc(p.nome)}
+                    - Estoque: ${esc(p.quantidade)}
+                    - ${brl(p.preco)}
+
+                  </option>
+
+                `).join("")}
+
+              </select>
+
+            </label>
+
+          `;
+
+        }
+
+
+        if (k === "quantidade") {
+
+          return `
+
+            <label>
+              Quantidade
+
+              <input
+                name="quantidade"
+                type="number"
+                min="0.01"
+                step="0.01"
+                value="1"
+                required
+              >
+
+            </label>
+
+          `;
+
+        }
+
+
+        if (k === "valor") {
+
+          return `
+
+            <label>
+              Preço total da venda
+
+              <input
+                name="valor"
+                type="number"
+                step="0.01"
+                readonly
+                required
+              >
+
+            </label>
+
+            <label>
+              Preço unitário
+
+              <input
+                name="precoUnitario"
+                type="number"
+                step="0.01"
+                readonly
+              >
+
+            </label>
+
+          `;
+
+        }
+
+
+        return "";
 
       }
 
@@ -616,15 +1302,10 @@ async function render() {
           ${esc(l)}
 
           <input
-
             name="${esc(k)}"
-
             type="${t || "text"}"
-
             ${t === "number" ? 'step="0.01" min="0"' : ""}
-
             required
-
           >
 
         </label>
@@ -635,7 +1316,71 @@ async function render() {
 
 
     // ==================================
-    // CONSTRUIR TABELA
+    // TABELA
+    // ==================================
+
+    const tabela = data.map(r => `
+
+      <tr>
+
+        ${cfg.fields.map(([k]) => {
+
+          let valor = r[k];
+
+          if (currentPage === "vendas") {
+
+            if (k === "clienteNome") {
+              valor = r.clienteNome || r.cliente || "";
+            }
+
+            if (k === "produtoNome") {
+              valor = r.produtoNome || r.produtoId || "";
+            }
+
+          }
+
+          return `
+
+            <td>
+
+              ${
+                ["valor", "custo", "preco", "valorRecebido", "valorPendente"].includes(k)
+                  ? brl(valor)
+                  : esc(valor)
+              }
+
+            </td>
+
+          `;
+
+        }).join("")}
+
+        <td>
+
+          <div class="actions">
+
+            <button
+              class="danger"
+              data-delete="${esc(r.id)}"
+              type="button"
+            >
+
+              <i class="fa-solid fa-trash"></i>
+              Excluir
+
+            </button>
+
+          </div>
+
+        </td>
+
+      </tr>
+
+    `).join("");
+
+
+    // ==================================
+    // TELA
     // ==================================
 
     content.innerHTML = `
@@ -657,15 +1402,55 @@ async function render() {
 
       <div class="panel">
 
-        <h3>Novo registro</h3>
+        <h3>${currentPage === "vendas" ? "Nova venda" : "Novo registro"}</h3>
 
         <form id="recordForm" class="form-grid">
 
           ${fields}
 
+          ${
+            currentPage === "vendas"
+              ? `
+
+                <div style="grid-column:1/-1">
+
+                  <h3>Formas de pagamento</h3>
+
+                  <div id="paymentsContainer"></div>
+
+                  <button type="button" id="addPayment">
+                    <i class="fa-solid fa-plus"></i>
+                    Adicionar forma de pagamento
+                  </button>
+
+                  <div id="paymentSummary" class="panel note" style="margin-top:15px"></div>
+
+                  <div id="dueDateWrap" hidden style="margin-top:15px">
+
+                    <label>
+                      Vencimento da promissória
+
+                      <input
+                        type="date"
+                        id="dueDate"
+                      >
+
+                    </label>
+
+                  </div>
+
+                </div>
+
+              `
+              : ""
+          }
+
           <button type="submit">
+
             <i class="fa-solid fa-floppy-disk"></i>
-            Salvar
+
+            ${currentPage === "vendas" ? "Registrar venda" : "Salvar"}
+
           </button>
 
         </form>
@@ -682,9 +1467,7 @@ async function render() {
             <tr>
 
               ${cfg.fields.map(x => `
-
                 <th>${esc(x[1])}</th>
-
               `).join("")}
 
               <th>Ações</th>
@@ -693,79 +1476,14 @@ async function render() {
 
           </thead>
 
-
           <tbody>
 
-            ${data.map(r => `
+            ${tabela || `
 
               <tr>
 
-                ${cfg.fields.map(([k]) => `
-
-                  <td>
-
-                    ${
-
-                      ["valor", "custo", "preco"].includes(k)
-
-                        ? brl(r[k])
-
-                        : esc(
-
-                            k === "produtoId"
-
-                              ? (r.produtoNome || r.produtoId)
-
-                              : r[k]
-
-                          )
-
-                    }
-
-                  </td>
-
-                `).join("")}
-
-
-                <td>
-
-                  <div class="actions">
-
-                    <button
-
-                      class="danger"
-
-                      data-delete="${esc(r.id)}"
-
-                      type="button"
-
-                    >
-
-                      <i class="fa-solid fa-trash"></i>
-                      Excluir
-
-                    </button>
-
-                  </div>
-
-                </td>
-
-              </tr>
-
-            `).join("") || `
-
-              <tr>
-
-                <td
-
-                  class="empty"
-
-                  colspan="${cfg.fields.length + 1}"
-
-                >
-
+                <td class="empty" colspan="${cfg.fields.length + 1}">
                   Nenhum registro cadastrado.
-
                 </td>
 
               </tr>
@@ -782,7 +1500,20 @@ async function render() {
 
 
     // ==================================
-    // SALVAR REGISTROS
+    // VENDAS
+    // ==================================
+
+    if (currentPage === "vendas") {
+
+      configurarVenda(data, produtos, clientes, currentRender);
+
+      return;
+
+    }
+
+
+    // ==================================
+    // SALVAR OUTROS REGISTROS
     // ==================================
 
     $("#recordForm").addEventListener("submit", async e => {
@@ -791,14 +1522,10 @@ async function render() {
 
       const form = e.currentTarget;
 
-      const button = form.querySelector(
-        'button[type="submit"]'
-      );
+      const button = form.querySelector('button[type="submit"]');
 
       button.disabled = true;
-
       button.textContent = "Salvando...";
-
 
       try {
 
@@ -806,10 +1533,6 @@ async function render() {
 
         const record = Object.fromEntries(fd.entries());
 
-
-        // ==================================
-        // CONVERTER CAMPOS NUMÉRICOS
-        // ==================================
 
         for (const [k, , t] of cfg.fields) {
 
@@ -834,215 +1557,19 @@ async function render() {
 
 
         record.criadoPor = user.uid;
-
         record.criadoEm = serverTimestamp();
 
 
-        // ==================================
-        // CADASTRAR PRODUTO
-        // ==================================
-
-        if (currentPage === "produtos") {
-
-          const novoProduto = push(
-            ref(db, "produtos")
-          );
-
-          await set(novoProduto, record);
-
-        }
-
-
-        // ==================================
-        // REALIZAR VENDA
-        // E BAIXAR ESTOQUE
-        // ==================================
-
-        else if (currentPage === "vendas") {
-
-          const produtoId = record.produtoId;
-
-          const quantidade = record.quantidade;
-
-
-          if (!produtoId) {
-
-            throw new Error(
-              "Selecione um produto."
-            );
-
-          }
-
-
-          if (quantidade <= 0) {
-
-            throw new Error(
-              "Informe uma quantidade válida."
-            );
-
-          }
-
-
-          const produtoRef = ref(
-            db,
-            `produtos/${produtoId}`
-          );
-
-
-          const stockRef = ref(
-            db,
-            `produtos/${produtoId}/quantidade`
-          );
-
-
-          // BUSCAR PRODUTO
-
-          const produtoSnapshot = await get(produtoRef);
-
-
-          if (!produtoSnapshot.exists()) {
-
-            throw new Error(
-              "Produto não encontrado."
-            );
-
-          }
-
-
-          const produto = produtoSnapshot.val();
-
-          console.log("DIAGNÓSTICO DA VENDA:", {
-  produtoId,
-  produtoNome: produto.nome,
-  quantidadeSolicitada: quantidade,
-  estoqueLido: produto.quantidade,
-  tipoEstoque: typeof produto.quantidade
-});
-
-
-          // GERAR ID DA VENDA
-
-          const novaVenda = push(
-            ref(db, "vendas")
-          );
-
-
-// BAIXAR ESTOQUE COM TRANSAÇÃO
-
-const transactionResult = await runTransaction(
-
-  stockRef,
-
-  current => {
-
-    const available = current === null
-      ? Number(produto.quantidade)
-      : Number(current);
-
-    console.log("TRANSAÇÃO DE ESTOQUE:", {
-      current,
-      available,
-      quantidade,
-      resultado: available - quantidade
-    });
-
-    if (
-      !Number.isFinite(available) ||
-      available < quantidade
-    ) {
-      return;
-    }
-
-    return available - quantidade;
-
-  }
-
-);
-
-if (!transactionResult.committed) {
-
-  const currentStock = (
-    await get(stockRef)
-  ).val();
-
-  throw new Error(
-    `Estoque insuficiente para ${produto.nome}. ` +
-    `Estoque atual: ${currentStock}.`
-  );
-
-}
-
-
-// GRAVAR VENDA
-
-
-          // GRAVAR VENDA
-
-          try {
-
-            await set(novaVenda, {
-
-              ...record,
-
-              produtoNome: produto.nome
-
-            });
-
-          } catch (err) {
-
-// DEVOLVER ESTOQUE SE A GRAVAÇÃO FALHAR
-
-await runTransaction(
-
-  stockRef,
-
-  current => {
-
-    if (
-      current === null ||
-      current === undefined
-    ) {
-      return;
-    }
-
-    return Number(current) + quantidade;
-
-  }
-
-);
-
-            throw err;
-
-          }
-
-        }
-
-
-        // ==================================
-        // OUTROS CADASTROS
-        // ==================================
-
-        else {
-
-          const novoRegistro = push(
-            ref(db, currentPage)
-          );
-
-          await set(novoRegistro, record);
-
-        }
+        const novoRegistro = push(
+          ref(db, currentPage)
+        );
+
+        await set(novoRegistro, record);
 
 
         alert("Registro salvo com sucesso!");
 
-
-        // Atualizar a tela atual
-        if (authenticated) {
-
-          await render();
-
-        }
-
+        await render();
 
       } catch (err) {
 
@@ -1053,7 +1580,6 @@ await runTransaction(
         button.disabled = false;
 
         button.innerHTML =
-
           '<i class="fa-solid fa-floppy-disk"></i> Salvar';
 
       }
@@ -1062,74 +1588,35 @@ await runTransaction(
 
 
     // ==================================
-    // EXCLUIR REGISTROS
+    // EXCLUIR OUTROS REGISTROS
     // ==================================
 
     content.querySelectorAll("[data-delete]").forEach(button => {
 
       button.addEventListener("click", async () => {
 
-        if (
-          !confirm(
-            "Deseja realmente excluir este registro?"
-          )
-        ) {
-
+        if (!confirm("Deseja realmente excluir este registro?")) {
           return;
-
         }
-
 
         try {
 
-          // AVISO SOBRE EXCLUSÃO DE VENDA
-
-          if (currentPage === "vendas") {
-
-            const confirmar = confirm(
-
-              "Atenção: excluir esta venda não devolverá o estoque. " +
-              "Deseja continuar?"
-
-            );
-
-            if (!confirmar) return;
-
-          }
-
-
           button.disabled = true;
-
           button.textContent = "Excluindo...";
 
-
           await remove(
-
-            ref(
-              db,
-              `${currentPage}/${button.dataset.delete}`
-            )
-
+            ref(db, `${currentPage}/${button.dataset.delete}`)
           );
-
 
           alert("Registro excluído!");
 
-
-          if (authenticated) {
-
-            await render();
-
-          }
-
+          await render();
 
         } catch (err) {
 
           console.error("Erro ao excluir:", err);
 
-          alert(
-            "Erro ao excluir: " + err.message
-          );
+          alert("Erro ao excluir: " + err.message);
 
           button.disabled = false;
 
@@ -1145,13 +1632,9 @@ await runTransaction(
 
   } catch (err) {
 
-    // Não mostrar erros de páginas que já foram abandonadas
-    if (currentRender !== renderVersion) {
-      return;
-    }
+    if (currentRender !== renderVersion) return;
 
     console.error("Erro ao carregar página:", err);
-
 
     content.innerHTML = `
 
@@ -1167,8 +1650,10 @@ await runTransaction(
         </p>
 
         <button id="retryPage" type="button">
+
           <i class="fa-solid fa-rotate"></i>
           Tentar novamente
+
         </button>
 
       </div>
@@ -1177,9 +1662,7 @@ await runTransaction(
 
 
     $("#retryPage").addEventListener("click", () => {
-
       render();
-
     });
 
   }
