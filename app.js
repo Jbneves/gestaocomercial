@@ -1,3 +1,7 @@
+```javascript
+// ======================================
+// FIREBASE - IMPORTAÇÕES
+// ======================================
 
 import {
   signInWithEmailAndPassword,
@@ -15,20 +19,12 @@ import {
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
 
+// O Firebase já é inicializado em firebase-config.js
 import { auth, db } from "./firebase-config.js";
 
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
-
-import { firebaseConfig } from "./firebase-config.js";
-
 // ======================================
-// INICIALIZAÇÃO FIREBASE
+// ELEMENTOS E VARIÁVEIS
 // ======================================
-
-const fb = initializeApp(firebaseConfig);
-
-const auth = getAuth(fb);
-const db = getDatabase(fb);
 
 const $ = s => document.querySelector(s);
 const content = $("#content");
@@ -128,6 +124,8 @@ $("#loginForm").addEventListener("submit", async e => {
       $("#password").value
     );
   } catch (err) {
+    console.error("Erro no login:", err);
+
     $("#loginError").textContent =
       "Falha no acesso. Confira e-mail e senha.";
   }
@@ -138,7 +136,11 @@ $("#loginForm").addEventListener("submit", async e => {
 // ======================================
 
 $("#logout").onclick = async () => {
-  await signOut(auth);
+  try {
+    await signOut(auth);
+  } catch (err) {
+    alert("Erro ao sair: " + err.message);
+  }
 };
 
 // ======================================
@@ -152,7 +154,7 @@ onAuthStateChanged(auth, async u => {
   $("#app").hidden = !u;
 
   if (u) {
-    $("#userEmail").textContent = u.email;
+    $("#userEmail").textContent = u.email || "";
     await render();
   }
 });
@@ -182,7 +184,9 @@ $("#menu").addEventListener("click", e => {
 async function getRows(name) {
   const snapshot = await get(ref(db, name));
 
-  if (!snapshot.exists()) return [];
+  if (!snapshot.exists()) {
+    return [];
+  }
 
   const data = snapshot.val();
 
@@ -219,9 +223,9 @@ function esc(s) {
 async function render() {
   try {
 
-    // ----------------------------------
+    // ==================================
     // PAINEL PRINCIPAL
-    // ----------------------------------
+    // ==================================
 
     if (page === "dashboard") {
 
@@ -277,9 +281,9 @@ async function render() {
       return;
     }
 
-    // ----------------------------------
+    // ==================================
     // CONFIGURAÇÃO DA PÁGINA
-    // ----------------------------------
+    // ==================================
 
     const cfg = configs[page];
 
@@ -293,9 +297,9 @@ async function render() {
       produtos = await getRows("produtos");
     }
 
-    // ----------------------------------
+    // ==================================
     // FORMULÁRIO
-    // ----------------------------------
+    // ==================================
 
     const fields = cfg.fields.map(([k, l, t]) => {
 
@@ -333,9 +337,9 @@ async function render() {
 
     }).join("");
 
-    // ----------------------------------
+    // ==================================
     // TABELA DE REGISTROS
-    // ----------------------------------
+    // ==================================
 
     content.innerHTML = `
       <div class="toolbar">
@@ -423,7 +427,6 @@ async function render() {
       try {
 
         const fd = new FormData(form);
-
         const record = Object.fromEntries(fd.entries());
 
         // CONVERTER CAMPOS NUMÉRICOS
@@ -446,9 +449,9 @@ async function render() {
         record.criadoPor = user.uid;
         record.criadoEm = serverTimestamp();
 
-        // --------------------------------
+        // ==================================
         // CADASTRAR PRODUTO
-        // --------------------------------
+        // ==================================
 
         if (page === "produtos") {
 
@@ -458,9 +461,9 @@ async function render() {
 
         }
 
-        // --------------------------------
+        // ==================================
         // REALIZAR VENDA E BAIXAR ESTOQUE
-        // --------------------------------
+        // ==================================
 
         else if (page === "vendas") {
 
@@ -485,7 +488,7 @@ async function render() {
             `produtos/${produtoId}/quantidade`
           );
 
-          // BUSCA O PRODUTO
+          // BUSCAR PRODUTO
 
           const produtoSnapshot = await get(produtoRef);
 
@@ -495,11 +498,11 @@ async function render() {
 
           const produto = produtoSnapshot.val();
 
-          // GERA ID DA VENDA
+          // GERAR ID DA VENDA
 
           const novaVenda = push(ref(db, "vendas"));
 
-          // BAIXA SEGURA DO ESTOQUE
+          // BAIXAR ESTOQUE COM TRANSAÇÃO
 
           const transactionResult = await runTransaction(
             stockRef,
@@ -536,7 +539,7 @@ async function render() {
             );
           }
 
-          // SALVA A VENDA
+          // GRAVAR VENDA
 
           try {
 
@@ -547,11 +550,14 @@ async function render() {
 
           } catch (err) {
 
-            // TENTA DEVOLVER O ESTOQUE CASO FALHE A VENDA
+            // TENTAR DEVOLVER ESTOQUE SE A VENDA FALHAR
 
             await runTransaction(stockRef, current => {
 
-              if (current === null || current === undefined) {
+              if (
+                current === null ||
+                current === undefined
+              ) {
                 return;
               }
 
@@ -564,9 +570,9 @@ async function render() {
 
         }
 
-        // --------------------------------
+        // ==================================
         // OUTROS CADASTROS
-        // --------------------------------
+        // ==================================
 
         else {
 
@@ -581,6 +587,8 @@ async function render() {
         await render();
 
       } catch (err) {
+
+        console.error("Erro ao salvar:", err);
 
         alert("Erro ao salvar: " + err.message);
 
@@ -605,8 +613,10 @@ async function render() {
 
         try {
 
-          // EXCLUSÃO DE VENDA NÃO DEVOLVE ESTOQUE
+          // AVISO SOBRE EXCLUSÃO DE VENDA
+
           if (page === "vendas") {
+
             const confirmar = confirm(
               "Atenção: excluir esta venda não devolverá o estoque. Deseja continuar?"
             );
@@ -624,6 +634,8 @@ async function render() {
 
         } catch (err) {
 
+          console.error("Erro ao excluir:", err);
+
           alert("Erro ao excluir: " + err.message);
 
         }
@@ -633,6 +645,8 @@ async function render() {
     });
 
   } catch (err) {
+
+    console.error("Erro ao carregar página:", err);
 
     content.innerHTML = `
       <div class="panel">
@@ -661,3 +675,4 @@ function metric(t, v) {
   `;
 
 }
+```
