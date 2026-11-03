@@ -229,13 +229,7 @@ async function render() {
 
     if (page === "dashboard") {
 
-      const [
-        clientes,
-        produtos,
-        vendas,
-        ordens,
-        caixa
-      ] = await Promise.all([
+      const [clientes, produtos, vendas, ordens, caixa] = await Promise.all([
         getRows("clientes"),
         getRows("produtos"),
         getRows("vendas"),
