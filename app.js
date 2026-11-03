@@ -1,4 +1,3 @@
-
 // ======================================
 // FIREBASE - IMPORTAÇÕES
 // ======================================
@@ -208,6 +207,7 @@ function configurarEstoque(produtos) {
   const quantityInput = $("#movementQuantity");
   const reasonInput = $("#movementReason");
 
+
   // Selecionar produto pelo botão da tabela.
 
   content.querySelectorAll("[data-stock-move]").forEach(button => {
@@ -241,6 +241,7 @@ function configurarEstoque(produtos) {
     const quantidade = Number(quantityInput.value);
     const motivo = reasonInput.value.trim();
 
+
     if (!produtoId) {
       alert("Selecione um produto.");
       return;
@@ -261,6 +262,7 @@ function configurarEstoque(produtos) {
       return;
     }
 
+
     const produto = produtos.find(p => p.id === produtoId);
 
     if (!produto) {
@@ -268,29 +270,81 @@ function configurarEstoque(produtos) {
       return;
     }
 
+
     if (!confirm(
       `${tipo} de ${quantidade} unidade(s) do produto ${produto.nome}?\n\n` +
       `Estoque atual: ${produto.quantidade}`
     )) return;
 
+
     button.disabled = true;
     button.textContent = "Processando...";
 
-    const produtoRef = ref(db, `produtos/${produtoId}`);
 
+    // Variáveis que também precisam estar acessíveis no catch.
+
+    let quantidadeRef = null;
     let movimentacaoRealizada = false;
 
     try {
 
-      // Atualizar estoque usando transação.
+      // ==================================
+      // BUSCAR PRODUTO NO FIREBASE
+      // ==================================
+
+      const produtoRef = ref(
+        db,
+        `produtos/${produtoId}`
+      );
+
+      const produtoSnapshot = await get(produtoRef);
+
+      if (!produtoSnapshot.exists()) {
+        throw new Error("O produto não foi encontrado no Firebase.");
+      }
+
+      const produtoAtual = produtoSnapshot.val();
+
+
+      // ==================================
+      // VALIDAR ESTOQUE ATUAL
+      // ==================================
+
+      const estoqueInicial = Number(
+        produtoAtual.quantidade ?? 0
+      );
+
+      if (
+        !Number.isFinite(estoqueInicial) ||
+        estoqueInicial < 0
+      ) {
+        throw new Error("O estoque atual do produto é inválido.");
+      }
+
+
+      // ==================================
+      // ATUALIZAR SOMENTE A QUANTIDADE
+      // ==================================
+
+      // A transação será feita no campo quantidade,
+      // sem substituir ou modificar os outros dados do produto.
+
+      quantidadeRef = ref(
+        db,
+        `produtos/${produtoId}/quantidade`
+      );
+
 
       const resultado = await runTransaction(
-        produtoRef,
+
+        quantidadeRef,
+
         atual => {
 
-          if (!atual) return;
+          const estoqueAtual = atual === null
+            ? estoqueInicial
+            : Number(atual);
 
-          const estoqueAtual = Number(atual.quantidade ?? 0);
 
           if (
             !Number.isFinite(estoqueAtual) ||
@@ -299,68 +353,91 @@ function configurarEstoque(produtos) {
             return;
           }
 
-          if (tipo === "Baixa" && estoqueAtual < quantidade) {
+
+          // Impedir baixa maior que o estoque disponível.
+
+          if (
+            tipo === "Baixa" &&
+            estoqueAtual < quantidade
+          ) {
             return;
           }
+
 
           const novoSaldo = tipo === "Entrada"
             ? estoqueAtual + quantidade
             : estoqueAtual - quantidade;
 
-          return {
-            ...atual,
-            quantidade: Math.round(novoSaldo * 100) / 100
-          };
+
+          return Math.round(novoSaldo * 100) / 100;
 
         }
+
       );
 
 
+      // ==================================
+      // VERIFICAR RESULTADO DA TRANSAÇÃO
+      // ==================================
+
       if (!resultado.committed) {
 
-        const atual = resultado.snapshot.val();
+        const estoqueAtual = resultado.snapshot.val();
 
-        if (!atual) {
-          throw new Error("O produto não foi encontrado no estoque.");
-        }
+        const saldoVerificado = estoqueAtual === null
+          ? estoqueInicial
+          : Number(estoqueAtual);
 
-        const estoqueAtual = Number(atual.quantidade ?? 0);
 
-        if (tipo === "Baixa" && estoqueAtual < quantidade) {
+        if (
+          tipo === "Baixa" &&
+          saldoVerificado < quantidade
+        ) {
 
           throw new Error(
-            `Estoque insuficiente. Saldo atual: ${estoqueAtual}.`
+            `Estoque insuficiente. Saldo atual: ${saldoVerificado}.`
           );
 
         }
 
-        throw new Error("Não foi possível atualizar o estoque.");
+
+        throw new Error(
+          "Não foi possível atualizar o estoque."
+        );
 
       }
 
 
       movimentacaoRealizada = true;
 
-      const produtoAtualizado = resultado.snapshot.val();
 
-      const saldoNovo = Number(produtoAtualizado.quantidade);
+      // ==================================
+      // CALCULAR SALDOS
+      // ==================================
+
+      const saldoNovo = Number(
+        resultado.snapshot.val()
+      );
 
       const saldoAnterior = tipo === "Entrada"
         ? saldoNovo - quantidade
         : saldoNovo + quantidade;
 
 
-      // Criar registro no histórico.
+      // ==================================
+      // REGISTRAR HISTÓRICO
+      // ==================================
 
       const historicoRef = push(
         ref(db, "movimentacoes_estoque")
       );
 
+
       await set(historicoRef, {
 
         produtoId,
 
-        produtoNome: produtoAtualizado.nome || produto.nome,
+        produtoNome: produtoAtual.nome || produto.nome,
 
         tipo,
 
@@ -383,6 +460,10 @@ function configurarEstoque(produtos) {
       });
 
 
+      // ==================================
+      // SUCESSO
+      // ==================================
+
       alert(
         "Movimentação registrada com sucesso!\n\n" +
         `Produto: ${produto.nome}\n` +
@@ -392,37 +473,68 @@ function configurarEstoque(produtos) {
         `Saldo atual: ${saldoNovo}`
       );
 
+
       await render();
+
 
     } catch (err) {
 
       console.error("Erro na movimentação:", err);
 
-      // Se o estoque foi alterado, mas o histórico não foi
-      // salvo, tentar restaurar o saldo anterior.
 
-      if (movimentacaoRealizada) {
+      // ==================================
+      // RESTAURAR ESTOQUE SE NECESSÁRIO
+      // ==================================
+
+      // Se a quantidade foi alterada, mas o histórico
+      // não foi salvo, tentar desfazer a movimentação.
+
+      if (movimentacaoRealizada && quantidadeRef) {
 
         try {
 
-          await runTransaction(produtoRef, atual => {
+          const rollback = await runTransaction(
 
-            if (!atual) return;
+            quantidadeRef,
 
-            const estoqueAtual = Number(atual.quantidade ?? 0);
+            atual => {
 
-            const saldoRestaurado = tipo === "Entrada"
-              ? estoqueAtual - quantidade
-              : estoqueAtual + quantidade;
+              const estoqueAtual = atual === null
+                ? Number(produto.quantidade ?? 0)
+                : Number(atual);
 
-            if (saldoRestaurado < 0) return;
 
-            return {
-              ...atual,
-              quantidade: Math.round(saldoRestaurado * 100) / 100
-            };
+              if (!Number.isFinite(estoqueAtual)) {
+                return;
+              }
 
-          });
+
+              const saldoRestaurado = tipo === "Entrada"
+                ? estoqueAtual - quantidade
+                : estoqueAtual + quantidade;
+
+
+              if (saldoRestaurado < 0) {
+                return;
+              }
+
+
+              return Math.round(
+                saldoRestaurado * 100
+              ) / 100;
+
+            }
+
+          );
+
+
+          if (!rollback.committed) {
+
+            throw new Error(
+              "A transação de restauração não foi concluída."
+            );
+
+          }
 
         } catch (rollbackError) {
 
@@ -432,15 +544,18 @@ function configurarEstoque(produtos) {
           );
 
           alert(
-            "Atenção: não foi possível restaurar automaticamente " +
-            "o estoque. Confira o saldo do produto."
+            "ATENÇÃO: a movimentação alterou o estoque, mas ocorreu " +
+            "um erro ao salvar o histórico e não foi possível restaurar " +
+            "automaticamente o saldo. Confira o estoque do produto."
           );
 
         }
 
       }
 
+
       alert("Erro na movimentação: " + err.message);
+
 
     } finally {
 
