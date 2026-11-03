@@ -1,27 +1,187 @@
+
 <!doctype html>
 <html lang="pt-BR">
+
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Gestão Comercial</title><link rel="stylesheet" href="style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>Gestão Comercial</title>
+
+  <link rel="stylesheet" href="style.css">
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
 </head>
+
 <body>
-<div id="login" class="login">
-  <form id="loginForm" class="login-card">
-    <h1>Gestão Comercial</h1><p>Acesse sua conta</p>
-    <label>E-mail<input id="email" name="email" type="email" autocomplete="username" required></label>
-    <label>Senha<input id="password" name="password" type="password" autocomplete="current-password" required></label>
-    <button>Entrar</button><p id="loginError" class="error"></p>
-  </form>
-</div>
-<div id="app" hidden>
-<header><div><b>Gestão Comercial</b><small id="userEmail"></small></div><button id="logout" class="light">Sair</button></header>
-<aside id="menu">
-  <button data-page="dashboard" class="selected">Resumo</button>
-  <button data-page="clientes">Clientes</button><button data-page="produtos">Estoque</button>
-  <button data-page="vendas">Vendas</button><button data-page="promissorias">Promissórias</button>
-  <button data-page="ordens">Ordens de serviço</button><button data-page="caixa">Fluxo de caixa</button>
-</aside>
-<main><div id="content"></div></main>
-</div>
-<script type="module" src="app.js"></script>
-</body></html>
+
+  <!-- LOGIN -->
+  <div id="login" class="login">
+
+    <form id="loginForm" class="login-card">
+
+      <div class="login-logo">
+        <i class="fa-solid fa-chart-line"></i>
+      </div>
+
+      <h1>Gestão Comercial</h1>
+      <p>Acesse sua conta para continuar</p>
+
+      <label>
+        E-mail
+        <input
+          id="email"
+          name="email"
+          type="email"
+          autocomplete="username"
+          placeholder="Seu e-mail"
+          required
+        >
+      </label>
+
+      <label>
+        Senha
+        <input
+          id="password"
+          name="password"
+          type="password"
+          autocomplete="current-password"
+          placeholder="Sua senha"
+          required
+        >
+      </label>
+
+      <button type="submit">
+        <i class="fa-solid fa-right-to-bracket"></i>
+        Entrar no sistema
+      </button>
+
+      <p id="loginError" class="error"></p>
+
+    </form>
+
+  </div>
+
+
+  <!-- SISTEMA -->
+  <div id="app" hidden>
+
+    <!-- CABEÇALHO -->
+    <header class="topbar">
+
+      <div class="topbar-left">
+
+        <button id="menuToggle" class="menu-toggle">
+          <i class="fa-solid fa-bars"></i>
+        </button>
+
+        <b>Gestão Comercial</b>
+
+      </div>
+
+      <div class="user-area">
+
+        <div class="user-info">
+          <i class="fa-solid fa-circle-user"></i>
+          <small id="userEmail"></small>
+        </div>
+
+        <button id="logout" class="logout-button">
+          <i class="fa-solid fa-right-from-bracket"></i>
+          Sair
+        </button>
+
+      </div>
+
+    </header>
+
+
+    <!-- ÁREA PRINCIPAL -->
+    <div class="layout">
+
+      <!-- MENU LATERAL -->
+      <aside id="sidebar" class="sidebar">
+
+        <div class="menu-title">
+          MENU PRINCIPAL
+        </div>
+
+        <nav id="menu">
+
+          <button data-page="dashboard" class="selected">
+            <i class="fa-solid fa-gauge-high"></i>
+            <span>Resumo</span>
+          </button>
+
+          <div class="menu-title">
+            CADASTROS
+          </div>
+
+          <button data-page="clientes">
+            <i class="fa-solid fa-users"></i>
+            <span>Clientes</span>
+          </button>
+
+          <button data-page="produtos">
+            <i class="fa-solid fa-boxes-stacked"></i>
+            <span>Estoque</span>
+          </button>
+
+          <div class="menu-title">
+            COMERCIAL
+          </div>
+
+          <button data-page="vendas">
+            <i class="fa-solid fa-cart-shopping"></i>
+            <span>Vendas</span>
+          </button>
+
+          <button data-page="promissorias">
+            <i class="fa-solid fa-file-invoice-dollar"></i>
+            <span>Promissórias</span>
+          </button>
+
+          <div class="menu-title">
+            SERVIÇOS
+          </div>
+
+          <button data-page="ordens">
+            <i class="fa-solid fa-screwdriver-wrench"></i>
+            <span>Ordens de serviço</span>
+          </button>
+
+          <div class="menu-title">
+            FINANCEIRO
+          </div>
+
+          <button data-page="caixa">
+            <i class="fa-solid fa-wallet"></i>
+            <span>Fluxo de caixa</span>
+          </button>
+
+        </nav>
+
+        <div class="sidebar-footer">
+          Gestão Comercial
+          <small>Controle empresarial</small>
+        </div>
+
+      </aside>
+
+
+      <!-- CONTEÚDO -->
+      <main class="main-content">
+
+        <div id="content"></div>
+
+      </main>
+
+    </div>
+
+  </div>
+
+
+  <script type="module" src="app.js"></script>
+
+</body>
+</html>
