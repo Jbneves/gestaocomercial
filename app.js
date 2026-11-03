@@ -251,7 +251,6 @@ async function render() {
         .filter(x => String(x.tipo).toLowerCase().startsWith("sa"))
         .reduce((a, x) => a + (Number(x.valor) || 0), 0);
 
-      // Certifique-se de usar a crase (`) corretamente aqui:
       content.innerHTML = `
         <div class="toolbar">
           <div>
