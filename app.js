@@ -17,6 +17,7 @@ import {
   remove,
   runTransaction,
   serverTimestamp
+} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
 
 // O Firebase já é inicializado em firebase-config.js
 import { auth, db } from "./firebase-config.js";
