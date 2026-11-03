@@ -911,6 +911,14 @@ async function render() {
 
           const produto = produtoSnapshot.val();
 
+          console.log("DIAGNÓSTICO DA VENDA:", {
+  produtoId,
+  produtoNome: produto.nome,
+  quantidadeSolicitada: quantidade,
+  estoqueLido: produto.quantidade,
+  tipoEstoque: typeof produto.quantidade
+});
+
 
           // GERAR ID DA VENDA
 
