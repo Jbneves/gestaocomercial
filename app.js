@@ -947,6 +947,15 @@ async function render() {
 
               const available = Number(current);
 
+              console.log("VERIFICAÇÃO DO ESTOQUE:", {
+  current,
+  available,
+  quantidade,
+  comparacao: available < quantidade,
+  tipoCurrent: typeof current,
+  tipoQuantidade: typeof quantidade
+});
+
 
               if (
                 !Number.isFinite(available) ||
