@@ -935,8 +935,6 @@ const transactionResult = await runTransaction(
 
   current => {
 
-    // Se o valor local ainda não foi carregado,
-    // utilizar a quantidade obtida na leitura do produto.
     const available = current === null
       ? Number(produto.quantidade)
       : Number(current);
@@ -961,7 +959,6 @@ const transactionResult = await runTransaction(
 
 );
 
-
 if (!transactionResult.committed) {
 
   const currentStock = (
@@ -976,14 +973,7 @@ if (!transactionResult.committed) {
 }
 
 
-            throw new Error(
-
-              `Estoque insuficiente para ${produto.nome}. ` +
-              `Estoque atual: ${currentStock}.`
-
-            );
-
-          }
+// GRAVAR VENDA
 
 
           // GRAVAR VENDA
