@@ -927,58 +927,53 @@ async function render() {
           );
 
 
-          // BAIXAR ESTOQUE COM TRANSAÇÃO
+// BAIXAR ESTOQUE COM TRANSAÇÃO
 
-          const transactionResult = await runTransaction(
+const transactionResult = await runTransaction(
 
-            stockRef,
+  stockRef,
 
-            current => {
+  current => {
 
-              if (
-                current === null ||
-                current === undefined
-              ) {
+    // Se o valor local ainda não foi carregado,
+    // utilizar a quantidade obtida na leitura do produto.
+    const available = current === null
+      ? Number(produto.quantidade)
+      : Number(current);
 
-                return;
+    console.log("TRANSAÇÃO DE ESTOQUE:", {
+      current,
+      available,
+      quantidade,
+      resultado: available - quantidade
+    });
 
-              }
+    if (
+      !Number.isFinite(available) ||
+      available < quantidade
+    ) {
+      return;
+    }
 
+    return available - quantidade;
 
-              const available = Number(current);
+  }
 
-              console.log("VERIFICAÇÃO DO ESTOQUE:", {
-  current,
-  available,
-  quantidade,
-  comparacao: available < quantidade,
-  tipoCurrent: typeof current,
-  tipoQuantidade: typeof quantidade
-});
-
-
-              if (
-                !Number.isFinite(available) ||
-                available < quantidade
-              ) {
-
-                return;
-
-              }
+);
 
 
-              return available - quantidade;
+if (!transactionResult.committed) {
 
-            }
+  const currentStock = (
+    await get(stockRef)
+  ).val();
 
-          );
+  throw new Error(
+    `Estoque insuficiente para ${produto.nome}. ` +
+    `Estoque atual: ${currentStock}.`
+  );
 
-
-          if (!transactionResult.committed) {
-
-            const currentStock = (
-              await get(stockRef)
-            ).val();
+}
 
 
             throw new Error(
