@@ -1,15 +1,11 @@
 
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-
 import {
-  getAuth,
   signInWithEmailAndPassword,
   onAuthStateChanged,
   signOut
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
 
 import {
-  getDatabase,
   ref,
   get,
   set,
@@ -17,6 +13,10 @@ import {
   remove,
   runTransaction,
   serverTimestamp
+} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
+
+import { auth, db } from "./firebase-config.js";
+
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
 import { firebaseConfig } from "./firebase-config.js";
