@@ -119,6 +119,11 @@ const configs = {
     ]
   },
 
+  relatorio_vendas: {
+    title: "Relatório de vendas",
+    fields: []
+  },
+
   empresa: {
     title: "Dados da empresa",
     fields: []
@@ -203,6 +208,37 @@ function dinheiroEmCentavos(valor) {
 // ======================================
 // COMPROVANTE DE VENDA - PDF E IMPRESSÃO
 // ======================================
+
+// ======================================
+// GERAÇÃO AUTOMÁTICA DE CÓDIGO DE PRODUTO
+// ======================================
+
+async function gerarCodigoProduto() {
+  try {
+    const produtos = await getRows("produtos");
+    let maiorNumero = 0;
+
+    produtos.forEach(p => {
+      if (p.codigo) {
+        const match = p.codigo.match(/\d+/);
+        if (match) {
+          const num = parseInt(match[0], 10);
+          if (num > maiorNumero) maiorNumero = num;
+        }
+      }
+    });
+
+    const proximo = maiorNumero + 1;
+    return `PROD-${String(proximo).padStart(4, "0")}`;
+  } catch (err) {
+    console.error("Erro ao gerar código do produto:", err);
+    return `PROD-${Date.now().toString().slice(-4)}`;
+  }
+}
+
+
+// ======================================
+
 
 async function carregarHtml2Pdf() {
 
@@ -651,6 +687,113 @@ function montarComprovanteHTML(venda, empresa = {}) {
 // BAIXAR PDF DA VENDA
 // ======================================
 
+// ======================================
+// IMPRESSÃO DE ORDEM DE SERVIÇO (OS)
+// ======================================
+
+async function imprimirOrdemServico(ordem) {
+  const janela = window.open("", "_blank");
+  if (!janela) {
+    alert("O navegador bloqueou a janela de impressão. Permita pop-ups para este site.");
+    return;
+  }
+
+  try {
+    const empresa = await buscarDadosEmpresa();
+
+    const logoHTML = empresa.logo
+      ? `<div class="logo-area"><img src="${esc(empresa.logo)}" alt="Logo"></div>`
+      : `<div class="logo-area sem-logo"><strong>${esc(empresa.fantasia || "EMPRESA")}</strong></div>`;
+
+    const htmlOS = `
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+      <head>
+        <meta charset="UTF-8">
+        <title>Ordem de Serviço #${esc(ordem.id || "")}</title>
+        <style>
+          body { font-family: Arial, sans-serif; color: #222; margin: 0; padding: 20px; font-size: 13px; line-height: 1.4; }
+          .cabecalho { display: flex; align-items: center; gap: 20px; border-bottom: 2px solid #333; padding-bottom: 12px; margin-bottom: 15px; }
+          .logo-area { width: 120px; min-width: 120px; height: 80px; display: flex; align-items: center; justify-content: center; }
+          .logo-area img { max-width: 110px; max-height: 75px; object-fit: contain; }
+          .sem-logo { border: 1px solid #ddd; text-align: center; padding: 5px; }
+          .empresa-info { flex: 1; }
+          .empresa-info h1 { font-size: 18px; margin: 0 0 5px; }
+          .titulo { text-align: center; font-size: 16px; font-weight: bold; margin: 15px 0; padding: 8px; background: #f1f1f1; border: 1px solid #ddd; }
+          .secao-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; border: 1px solid #ddd; padding: 10px; margin-bottom: 15px; }
+          .secao-grid p { margin: 4px 0; }
+          .bloco { margin-bottom: 15px; border: 1px solid #ddd; padding: 10px; }
+          .bloco h3 { margin: 0 0 8px 0; font-size: 14px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+          .totais { width: 40%; margin-left: auto; border: 1px solid #ddd; padding: 10px; font-weight: bold; text-align: right; }
+          .assinatura { margin-top: 50px; text-align: center; }
+          .assinatura span { display: inline-block; width: 250px; border-top: 1px solid #333; padding-top: 5px; }
+          @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+        </style>
+      </head>
+      <body>
+        <div class="cabecalho">
+          ${logoHTML}
+          <div class="empresa-info">
+            <h1>${esc(empresa.fantasia || "EMPRESA")}</h1>
+            <p>${esc(empresa.documento || "")} | ${esc(empresa.telefone || "")}</p>
+            <p>${esc(empresa.endereco || "")}</p>
+          </div>
+        </div>
+
+        <div class="titulo">ORDEM DE SERVIÇO Nº ${esc(ordem.id || "")}</div>
+
+        <div class="secao-grid">
+          <p><strong>Cliente:</strong> ${esc(ordem.cliente || "Não informado")}</p>
+          <p><strong>Status:</strong> ${esc(ordem.status || "Pendente")}</p>
+          <p><strong>Responsável:</strong> ${esc(ordem.responsavel || "Não informado")}</p>
+          <p><strong>Data:</strong> ${esc(ordem.data || hoje())}</p>
+        </div>
+
+        <div class="bloco">
+          <h3>Equipamento / Produto</h3>
+          <p>${esc(ordem.equipamento || "Não informado")}</p>
+        </div>
+
+        <div class="bloco">
+          <h3>Defeito Relatado</h3>
+          <p>${esc(ordem.defeito || "Não informado")}</p>
+        </div>
+
+        <div class="bloco">
+          <h3>Serviço Executado</h3>
+          <p>${esc(ordem.servico || "Aguardando execução")}</p>
+        </div>
+
+        <div class="totais">
+          Valor Total: ${brl(ordem.valor)}
+        </div>
+
+        <div class="assinatura">
+          <span>Assinatura do Cliente / Responsável</span>
+        </div>
+      </body>
+      </html>
+    `;
+
+    janela.onload = () => {
+      janela.focus();
+      janela.print();
+    };
+
+    janela.document.open();
+    janela.document.write(htmlOS);
+    janela.document.close();
+
+  } catch (err) {
+    console.error("Erro ao imprimir OS:", err);
+    janela.close();
+    alert("Erro ao preparar impressão da OS: " + err.message);
+  }
+}
+
+
+
+
 async function baixarPDFVenda(venda) {
 
   let elemento = null;
@@ -877,6 +1020,181 @@ async function imprimirVenda(venda) {
 // ======================================
 // CADASTRO DOS DADOS DA EMPRESA
 // ======================================
+
+// ======================================
+// RELATÓRIO DE VENDAS POR PERÍODO
+// ======================================
+
+async function renderRelatorioVendas(currentRender) {
+  if (
+    currentRender !== renderVersion ||
+    !authenticated ||
+    page !== "relatorio_vendas"
+  ) return;
+
+  const hojeStr = hoje();
+  const dataInicioPadrao = new Date();
+  dataInicioPadrao.setDate(dataInicioPadrao.getDate() - 30);
+  const inicioStr = dataInicioPadrao.toISOString().split("T")[0];
+
+  content.innerHTML = `
+    <div class="toolbar">
+      <div>
+        <h2>Relatório de Vendas por Período</h2>
+        <span class="muted">Consulte o faturamento, quantidade de vendas e formas de pagamento recebidas.</span>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom: 20px;">
+      <form id="filtroRelatorio" style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
+        <label>
+          Data Inicial
+          <input type="date" id="dataInicio" value="${inicioStr}" required style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        </label>
+        <label>
+          Data Final
+          <input type="date" id="dataFim" value="${hojeStr}" required style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        </label>
+        <button type="submit" style="padding: 9px 16px; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer;">
+          <i class="fa-solid fa-filter"></i> Filtrar Relatório
+        </button>
+      </form>
+    </div>
+
+    <div id="resultadoRelatorio">
+      <!-- Conteúdo gerado dinamicamente -->
+    </div>
+  `;
+
+  const formFiltro = $("#filtroRelatorio");
+  const divResultado = $("#resultadoRelatorio");
+
+  async function carregarRelatorio(dataIni, dataFim) {
+    divResultado.innerHTML = `<p class="muted">Carregando dados...</p>`;
+
+    try {
+      const vendas = await getRows("vendas");
+
+      const vendasFiltradas = vendas.filter(v => {
+        if (!v.criadoEm) return false;
+        let dataVendaStr = "";
+        if (typeof v.criadoEm === "number" || typeof v.criadoEm === "string") {
+          dataVendaStr = new Date(v.criadoEm).toISOString().split("T")[0];
+        } else if (v.criadoEm.seconds) {
+          dataVendaStr = new Date(v.criadoEm.seconds * 1000).toISOString().split("T")[0];
+        }
+        return dataVendaStr >= dataIni && dataVendaStr <= dataFim;
+      });
+
+      let totalFaturado = 0;
+      let totalRecebido = 0;
+      let totalPendente = 0;
+      const formasPagamentoMap = {};
+
+      vendasFiltradas.forEach(v => {
+        totalFaturado += Number(v.valor) || 0;
+        totalRecebido += Number(v.valorRecebido) || 0;
+        totalPendente += Number(v.valorPendente) || 0;
+
+        if (Array.isArray(v.pagamentos)) {
+          v.pagamentos.forEach(p => {
+            const metodo = p.metodo || "Outros";
+            const val = Number(p.valor) || 0;
+            formasPagamentoMap[metodo] = (formasPagamentoMap[metodo] || 0) + val;
+          });
+        }
+      });
+
+      const pagamentosHTML = Object.entries(formasPagamentoMap).length > 0
+        ? Object.entries(formasPagamentoMap).map(([metodo, valor]) => `
+            <tr>
+              <td>${esc(metodo)}</td>
+              <td class="valor">${brl(valor)}</td>
+            </tr>
+          `).join("")
+        : `<tr><td colspan="2">Nenhum pagamento registrado no período.</td></tr>`;
+
+      const listaVendasHTML = vendasFiltradas.length > 0
+        ? vendasFiltradas.map(v => `
+            <tr>
+              <td>${esc(v.id)}</td>
+              <td>${esc(formatarDataVenda(v.criadoEm))}</td>
+              <td>${esc(v.clienteNome || v.cliente || "Cliente não informado")}</td>
+              <td class="valor">${brl(v.valor)}</td>
+            </tr>
+          `).join("")
+        : `<tr><td colspan="4" style="text-align: center;">Nenhuma venda encontrada no período selecionado.</td></tr>`;
+
+      divResultado.innerHTML = `
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 25px;">
+          <div class="panel" style="background: #f8fafc; border-left: 4px solid #2563eb; padding: 15px;">
+            <span class="muted">Total de Vendas</span>
+            <h3 style="margin: 5px 0 0; font-size: 20px;">${vendasFiltradas.length}</h3>
+          </div>
+          <div class="panel" style="background: #f8fafc; border-left: 4px solid #16a34a; padding: 15px;">
+            <span class="muted">Valor Faturado</span>
+            <h3 style="margin: 5px 0 0; font-size: 20px; color: #16a34a;">${brl(totalFaturado)}</h3>
+          </div>
+          <div class="panel" style="background: #f8fafc; border-left: 4px solid #0284c7; padding: 15px;">
+            <span class="muted">Valor Recebido</span>
+            <h3 style="margin: 5px 0 0; font-size: 20px;">${brl(totalRecebido)}</h3>
+          </div>
+          <div class="panel" style="background: #f8fafc; border-left: 4px solid #dc2626; padding: 15px;">
+            <span class="muted">Valor Pendente</span>
+            <h3 style="margin: 5px 0 0; font-size: 20px; color: #dc2626;">${brl(totalPendente)}</h3>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-bottom: 25px;">
+          <h3>Formas de Pagamento no Período</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Método de Pagamento</th>
+                <th class="valor">Total Arrecadado</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${pagamentosHTML}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="panel">
+          <h3>Detalhamento das Vendas</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>ID / Venda</th>
+                <th>Data</th>
+                <th>Cliente</th>
+                <th class="valor">Valor Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${listaVendasHTML}
+            </tbody>
+          </table>
+        </div>
+      `;
+
+    } catch (err) {
+      console.error("Erro ao gerar relatório:", err);
+      divResultado.innerHTML = `<p style="color: red;">Erro ao carregar relatório: ${err.message}</p>`;
+    }
+  }
+
+  formFiltro.addEventListener("submit", e => {
+    e.preventDefault();
+    const ini = $("#dataInicio").value;
+    const fim = $("#dataFim").value;
+    carregarRelatorio(ini, fim);
+  });
+
+  carregarRelatorio(inicioStr, hojeStr);
+}
+
+
 
 async function renderEmpresa(currentRender) {
 
@@ -2614,6 +2932,11 @@ async function render() {
     // TELA DE DADOS DA EMPRESA
     // ==================================
 
+    if (currentPage === "relatorio_vendas") {
+      await renderRelatorioVendas(currentRender);
+      return;
+    }
+
     if (currentPage === "empresa") {
 
       await renderEmpresa(currentRender);
@@ -2624,6 +2947,8 @@ async function render() {
 
 
     const data = await getRows(currentPage);
+
+    const codigoSugerido = currentPage === "produtos" ? await gerarCodigoProduto() : "";
 
     let produtos = [];
     let clientes = [];
@@ -2793,6 +3118,15 @@ async function render() {
       }
 
 
+      if (currentPage === "produtos" && k === "codigo") {
+        return `
+          <label>
+            ${esc(l)} (automático)
+            <input name="codigo" type="text" value="${esc(codigoSugerido)}" placeholder="Gerado automaticamente">
+          </label>
+        `;
+      }
+
       return `
 
         <label>
@@ -2875,6 +3209,23 @@ async function render() {
                   >
                     <i class="fa-solid fa-print"></i>
                     Imprimir
+                  </button>
+
+                `
+                : ""
+            }
+
+
+            ${
+              currentPage === "ordens"
+                ? `
+
+                  <button
+                    type="button"
+                    data-os-print="${esc(r.id)}"
+                  >
+                    <i class="fa-solid fa-print"></i>
+                    Imprimir OS
                   </button>
 
                 `
@@ -3267,6 +3618,14 @@ async function render() {
         }
 
 
+        if (currentPage === "produtos" && !String(record.codigo || "").trim()) {
+          record.codigo = await gerarCodigoProduto();
+        }
+
+        if (currentPage === "ordens" && !record.data) {
+          record.data = hoje();
+        }
+
         record.criadoPor = user.uid;
         record.criadoEm = serverTimestamp();
 
@@ -3296,6 +3655,16 @@ async function render() {
 
       }
 
+    });
+
+
+    // IMPRIMIR ORDEM DE SERVIÇO
+
+    content.querySelectorAll("[data-os-print]").forEach(button => {
+      button.addEventListener("click", () => {
+        const ordem = data.find(o => o.id === button.dataset.osPrint);
+        if (ordem) imprimirOrdemServico(ordem);
+      });
     });
 
 
