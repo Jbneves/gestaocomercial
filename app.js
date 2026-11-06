@@ -1112,6 +1112,30 @@ async function renderRelatorioVendas(currentRender) {
         }
       });
 
+      // DADOS PARA OS GRÁFICOS
+      const diaDe = v => {
+        if (typeof v.criadoEm === "number" || typeof v.criadoEm === "string") return new Date(v.criadoEm).toISOString().split("T")[0];
+        if (v.criadoEm && v.criadoEm.seconds) return new Date(v.criadoEm.seconds * 1000).toISOString().split("T")[0];
+        return "";
+      };
+      const dias = [];
+      for (let d = new Date(dataIni + "T00:00:00Z"); d <= new Date(dataFim + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 1)) {
+        dias.push(d.toISOString().split("T")[0]);
+        if (dias.length > 400) break;
+      }
+      const metodos = Object.keys(formasPagamentoMap);
+      const totalPorDia = Object.fromEntries(dias.map(d => [d, 0]));
+      const metodoPorDia = Object.fromEntries(metodos.map(m => [m, Object.fromEntries(dias.map(d => [d, 0]))]));
+      vendasFiltradas.forEach(v => {
+        const d = diaDe(v);
+        if (!(d in totalPorDia)) return;
+        totalPorDia[d] += Number(v.valor) || 0;
+        (Array.isArray(v.pagamentos) ? v.pagamentos : []).forEach(p => {
+          const m = p.metodo || "Outros";
+          if (metodoPorDia[m]) metodoPorDia[m][d] += Number(p.valor) || 0;
+        });
+      });
+
       const pagamentosHTML = Object.entries(formasPagamentoMap).length > 0
         ? Object.entries(formasPagamentoMap).map(([metodo, valor]) => `
             <tr>
@@ -1152,6 +1176,17 @@ async function renderRelatorioVendas(currentRender) {
           </div>
         </div>
 
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:15px; margin-bottom:25px;">
+          <div class="panel" style="grid-column: span 2; min-width:0;">
+            <h3>Vendas por dia e forma de pagamento</h3>
+            <div style="position:relative; height:320px;"><canvas id="graficoVendasDia"></canvas></div>
+          </div>
+          <div class="panel" style="min-width:0;">
+            <h3>Divisão por forma de pagamento</h3>
+            <div style="position:relative; height:320px;"><canvas id="graficoPagamentos"></canvas></div>
+          </div>
+        </div>
+
         <div class="panel" style="margin-bottom: 25px;">
           <h3>Formas de Pagamento no Período</h3>
           <table>
@@ -1185,9 +1220,77 @@ async function renderRelatorioVendas(currentRender) {
         </div>
       `;
 
+      await desenharGraficos(dias, totalPorDia, metodos, metodoPorDia, formasPagamentoMap);
+
     } catch (err) {
       console.error("Erro ao gerar relatório:", err);
       divResultado.innerHTML = `<p style="color: red;">Erro ao carregar relatório: ${err.message}</p>`;
+    }
+  }
+
+  let graficos = [];
+  async function desenharGraficos(dias, totalPorDia, metodos, metodoPorDia, formasMap) {
+    try {
+      if (!window.__ChartJS) {
+        const mod = await import("https://cdn.jsdelivr.net/npm/chart.js@4.4.1/auto/+esm");
+        window.__ChartJS = mod.default || mod.Chart;
+      }
+      const Chart = window.__ChartJS;
+      graficos.forEach(g => g.destroy());
+      graficos = [];
+      const c1 = document.getElementById("graficoVendasDia");
+      const c2 = document.getElementById("graficoPagamentos");
+      if (!c1 || !c2) return;
+      const cores = ["#2563eb", "#16a34a", "#f59e0b", "#dc2626", "#7c3aed", "#0891b2", "#db2777", "#65a30d"];
+      const rotulo = d => d.split("-").reverse().slice(0, 2).join("/");
+      const moeda = v => brl(v);
+
+      graficos.push(new Chart(c1, {
+        data: {
+          labels: dias.map(rotulo),
+          datasets: [
+            ...metodos.map((m, i) => ({
+              type: "bar", label: m, stack: "pag",
+              data: dias.map(d => metodoPorDia[m][d]),
+              backgroundColor: cores[i % cores.length]
+            })),
+            {
+              type: "line", label: "Total vendido",
+              data: dias.map(d => totalPorDia[d]),
+              borderColor: "#111827", backgroundColor: "#111827", tension: 0.3, pointRadius: 3
+            }
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          interaction: { mode: "index", intersect: false },
+          scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { callback: moeda } } },
+          plugins: { tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${moeda(ctx.parsed.y)}` } } }
+        }
+      }));
+
+      const entradas = Object.entries(formasMap);
+      graficos.push(new Chart(c2, {
+        type: "doughnut",
+        data: {
+          labels: entradas.length ? entradas.map(e => e[0]) : ["Sem pagamentos"],
+          datasets: [{
+            data: entradas.length ? entradas.map(e => e[1]) : [1],
+            backgroundColor: entradas.length ? entradas.map((_, i) => cores[i % cores.length]) : ["#e5e7eb"]
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { position: "bottom" },
+            tooltip: { callbacks: { label: ctx => entradas.length ? `${ctx.label}: ${moeda(ctx.parsed)}` : "Sem pagamentos" } }
+          }
+        }
+      }));
+    } catch (err) {
+      console.error("Erro ao desenhar gráficos:", err);
+      const c1 = document.getElementById("graficoVendasDia");
+      if (c1) c1.parentElement.innerHTML = `<p class="muted">Não foi possível carregar os gráficos (verifique a internet).</p>`;
     }
   }
 
@@ -3070,6 +3173,10 @@ async function render() {
 
     }
 
+    if (currentPage === "ordens") {
+      clientes = await getRows("clientes");
+    }
+
 
     if (
       currentRender !== renderVersion ||
@@ -3081,6 +3188,22 @@ async function render() {
     // CONSTRUIR FORMULÁRIOS
 
     const fields = cfg.fields.map(([k, l, t]) => {
+
+      if (currentPage === "ordens" && k === "cliente") {
+        return `
+            <label>
+              Cliente
+              <input name="cliente" list="listaClientesOS" required
+                autocomplete="off" placeholder="Digite para buscar o cliente">
+              <datalist id="listaClientesOS">
+                ${clientes.map(c => `
+                  <option value="${esc(c.nome || "")}">${esc([c.telefone, c.documento].filter(Boolean).join(" • "))}</option>
+                `).join("")}
+              </datalist>
+              <small class="muted">${clientes.length ? "Comece a digitar e escolha o cliente da lista." : "Nenhum cliente cadastrado ainda."}</small>
+            </label>
+        `;
+      }
 
       if (currentPage === "vendas") {
 
@@ -3667,6 +3790,17 @@ async function render() {
 
         if (currentPage === "ordens" && !record.data) {
           record.data = hoje();
+        }
+
+        if (currentPage === "ordens") {
+          const nomeCli = String(record.cliente || "").trim().toLowerCase();
+          const cli = clientes.find(x => String(x.nome || "").trim().toLowerCase() === nomeCli);
+          if (cli) {
+            record.clienteId = cli.id;
+            record.cliente = cli.nome;
+            record.clienteTelefone = cli.telefone || "";
+            record.clienteDocumento = cli.documento || "";
+          }
         }
 
         record.criadoPor = user.uid;
