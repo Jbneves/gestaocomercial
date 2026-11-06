@@ -603,7 +603,7 @@ function montarComprovanteHTML(venda, empresa = {}) {
       </div>
 
 
-      <h2>Produto vendido</h2>
+      <h2>Produtos vendidos</h2>
 
       <table>
 
@@ -617,12 +617,19 @@ function montarComprovanteHTML(venda, empresa = {}) {
         </thead>
 
         <tbody>
-          <tr>
-            <td>${esc(venda.produtoNome || "Não informado")}</td>
-            <td>${esc(venda.quantidade)}</td>
-            <td>${brl(venda.precoUnitario)}</td>
-            <td>${brl(venda.valor)}</td>
-          </tr>
+          ${
+            (Array.isArray(venda.itens) && venda.itens.length
+              ? venda.itens
+              : [{ produtoNome: venda.produtoNome, quantidade: venda.quantidade, precoUnitario: venda.precoUnitario, subtotal: venda.valor }]
+            ).map(item => `
+              <tr>
+                <td>${esc(item.produtoNome || "Não informado")}</td>
+                <td>${esc(item.quantidade)}</td>
+                <td>${brl(item.precoUnitario)}</td>
+                <td>${brl(item.subtotal)}</td>
+              </tr>
+            `).join("")
+          }
         </tbody>
 
       </table>
@@ -2260,10 +2267,9 @@ function configurarVenda(data, produtos, clientes, currentRender) {
 
   const form = $("#recordForm");
 
-  const productSelect = form.querySelector('[name="produtoId"]');
   const customerSelect = form.querySelector('[name="clienteId"]');
-  const quantityInput = form.querySelector('[name="quantidade"]');
-  const priceInput = form.querySelector('[name="precoUnitario"]');
+  const itemsContainer = $("#itemsContainer");
+  const addItemButton = $("#addItem");
   const totalInput = form.querySelector('[name="valor"]');
 
   const paymentsContainer = $("#paymentsContainer");
@@ -2340,23 +2346,72 @@ function configurarVenda(data, produtos, clientes, currentRender) {
   }
 
 
+  function itemRow() {
+
+    return `
+
+      <div class="item-row" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
+
+        <label style="flex:3;min-width:200px">
+          Produto
+          <select class="item-product" required>
+            <option value="">Selecione um produto</option>
+            ${produtos.map(p => `
+              <option value="${esc(p.id)}" ${Number(p.quantidade) <= 0 ? "disabled" : ""}>
+                ${esc(p.nome)} - Estoque: ${esc(p.quantidade)} - ${brl(p.preco)}
+              </option>
+            `).join("")}
+          </select>
+        </label>
+
+        <label style="flex:1;min-width:90px">
+          Quantidade
+          <input class="item-qty" type="number" min="0.01" step="0.01" value="1" required>
+        </label>
+
+        <label style="flex:1;min-width:110px">
+          Subtotal
+          <input class="item-subtotal" type="text" readonly>
+        </label>
+
+        <button type="button" class="remove-item danger">
+          <i class="fa-solid fa-trash"></i>
+        </button>
+
+      </div>
+
+    `;
+
+  }
+
+
+  function lerItens() {
+
+    return [...itemsContainer.querySelectorAll(".item-row")].map(row => ({
+      row,
+      produtoId: row.querySelector(".item-product").value,
+      quantidade: Number(row.querySelector(".item-qty").value) || 0
+    }));
+
+  }
+
+
   function atualizarTotal() {
 
-    const produto = produtos.find(
-      p => p.id === productSelect.value
-    );
+    let totalCentavos = 0;
 
-    const quantidade = Number(quantityInput.value) || 0;
+    lerItens().forEach(item => {
 
-    const preco = produto
-      ? Number(produto.preco) || 0
-      : 0;
+      const produto = produtos.find(p => p.id === item.produtoId);
+      const preco = produto ? Number(produto.preco) || 0 : 0;
+      const sub = Math.round(preco * item.quantidade * 100);
 
-    priceInput.value = preco.toFixed(2);
+      totalCentavos += sub;
+      item.row.querySelector(".item-subtotal").value = brl(sub / 100);
 
-    totalInput.value = (
-      Math.round(preco * quantidade * 100) / 100
-    ).toFixed(2);
+    });
+
+    totalInput.value = (totalCentavos / 100).toFixed(2);
 
 
     const rows = paymentsContainer.querySelectorAll(".payment-row");
@@ -2417,9 +2472,28 @@ function configurarVenda(data, produtos, clientes, currentRender) {
   addPaymentButton.addEventListener("click", adicionarPagamento);
 
 
-  productSelect.addEventListener("change", atualizarTotal);
+  function adicionarItem() {
+    itemsContainer.insertAdjacentHTML("beforeend", itemRow());
+    atualizarTotal();
+  }
 
-  quantityInput.addEventListener("input", atualizarTotal);
+  itemsContainer.addEventListener("input", atualizarTotal);
+  itemsContainer.addEventListener("change", atualizarTotal);
+
+  itemsContainer.addEventListener("click", e => {
+    const btn = e.target.closest(".remove-item");
+    if (!btn) return;
+    if (itemsContainer.querySelectorAll(".item-row").length <= 1) {
+      alert("A venda precisa ter pelo menos um produto.");
+      return;
+    }
+    btn.closest(".item-row").remove();
+    atualizarTotal();
+  });
+
+  addItemButton.addEventListener("click", adicionarItem);
+
+  adicionarItem();
 
 
   adicionarPagamento();
@@ -2438,8 +2512,17 @@ function configurarVenda(data, produtos, clientes, currentRender) {
     button.disabled = true;
     button.textContent = "Registrando venda...";
 
-    let stockRef = null;
-    let quantidade = 0;
+    const baixados = [];
+
+    async function devolverEstoque() {
+      for (const b of baixados) {
+        await runTransaction(b.ref, current => {
+          if (current === null || current === undefined) return;
+          return Number(current) + b.quantidade;
+        });
+      }
+      baixados.length = 0;
+    }
 
     try {
 
@@ -2447,8 +2530,10 @@ function configurarVenda(data, produtos, clientes, currentRender) {
         throw new Error("Selecione um cliente.");
       }
 
-      if (!productSelect.value) {
-        throw new Error("Selecione um produto.");
+      const itensForm = lerItens();
+
+      if (!itensForm.length) {
+        throw new Error("Adicione pelo menos um produto.");
       }
 
 
@@ -2461,41 +2546,68 @@ function configurarVenda(data, produtos, clientes, currentRender) {
       }
 
 
-      const produtoRef = ref(
-        db,
-        `produtos/${productSelect.value}`
-      );
+      // Juntar produtos repetidos e validar
+      const agrupados = {};
 
-      const produtoSnapshot = await get(produtoRef);
+      for (const item of itensForm) {
 
-      if (!produtoSnapshot.exists()) {
-        throw new Error("Produto não encontrado.");
-      }
+        if (!item.produtoId) {
+          throw new Error("Selecione o produto em todas as linhas.");
+        }
 
-      const produto = produtoSnapshot.val();
+        if (!Number.isFinite(item.quantidade) || item.quantidade <= 0) {
+          throw new Error("Informe uma quantidade válida em todas as linhas.");
+        }
 
+        agrupados[item.produtoId] =
+          (agrupados[item.produtoId] || 0) + item.quantidade;
 
-      quantidade = Number(quantityInput.value);
-
-      if (!Number.isFinite(quantidade) || quantidade <= 0) {
-        throw new Error("Informe uma quantidade válida.");
-      }
-
-
-      const precoUnitario = Number(produto.preco);
-
-      if (!Number.isFinite(precoUnitario) || precoUnitario < 0) {
-        throw new Error("Preço do produto inválido.");
       }
 
 
-      const totalVenda = Math.round(
-        precoUnitario * quantidade * 100
-      ) / 100;
+      const itens = [];
+      let totalCentavosItens = 0;
+
+      for (const [produtoId, qtd] of Object.entries(agrupados)) {
+
+        const snap = await get(ref(db, `produtos/${produtoId}`));
+
+        if (!snap.exists()) {
+          throw new Error("Produto não encontrado.");
+        }
+
+        const p = snap.val();
+        const precoUnitario = Number(p.preco);
+
+        if (!Number.isFinite(precoUnitario) || precoUnitario < 0) {
+          throw new Error(`Preço inválido para ${p.nome}.`);
+        }
+
+        const subtotal = Math.round(precoUnitario * qtd * 100) / 100;
+        totalCentavosItens += dinheiroEmCentavos(subtotal);
+
+        itens.push({
+          produtoId,
+          produtoNome: p.nome,
+          quantidade: qtd,
+          precoUnitario,
+          subtotal,
+          estoqueAtual: p.quantidade
+        });
+
+      }
+
+
+      const totalVenda = totalCentavosItens / 100;
 
       if (totalVenda <= 0) {
         throw new Error("O total da venda precisa ser maior que zero.");
       }
+
+      const quantidade = itens.reduce((t, i) => t + i.quantidade, 0);
+      const nomesProdutos = itens
+        .map(i => `${i.produtoNome} (${i.quantidade})`)
+        .join(", ");
 
 
       const pagamentos = [
@@ -2562,49 +2674,40 @@ function configurarVenda(data, produtos, clientes, currentRender) {
       }
 
 
-      // BAIXAR ESTOQUE COM TRANSAÇÃO
+      // BAIXAR ESTOQUE DE CADA PRODUTO COM TRANSAÇÃO
 
-      stockRef = ref(
-        db,
-        `produtos/${productSelect.value}/quantidade`
-      );
+      for (const item of itens) {
 
+        const stockRef = ref(db, `produtos/${item.produtoId}/quantidade`);
 
-      const transactionResult = await runTransaction(
-
-        stockRef,
-
-        current => {
+        const result = await runTransaction(stockRef, current => {
 
           const available = current === null
-            ? Number(produto.quantidade)
+            ? Number(item.estoqueAtual)
             : Number(current);
 
-
-          if (
-            !Number.isFinite(available) ||
-            available < quantidade
-          ) {
+          if (!Number.isFinite(available) || available < item.quantidade) {
             return;
           }
 
-          return available - quantidade;
+          return available - item.quantidade;
+
+        });
+
+        if (!result.committed) {
+
+          const currentStock = (await get(stockRef)).val();
+
+          await devolverEstoque();
+
+          throw new Error(
+            `Estoque insuficiente para ${item.produtoNome}. ` +
+            `Estoque atual: ${currentStock}.`
+          );
 
         }
 
-      );
-
-
-      if (!transactionResult.committed) {
-
-        const currentStock = (
-          await get(stockRef)
-        ).val();
-
-        throw new Error(
-          `Estoque insuficiente para ${produto.nome}. ` +
-          `Estoque atual: ${currentStock}.`
-        );
+        baixados.push({ ref: stockRef, quantidade: item.quantidade });
 
       }
 
@@ -2625,11 +2728,13 @@ function configurarVenda(data, produtos, clientes, currentRender) {
         clienteId: cliente.id,
         clienteNome: cliente.nome,
 
-        produtoId: productSelect.value,
-        produtoNome: produto.nome,
+        itens: itens.map(({ estoqueAtual, ...i }) => i),
+
+        produtoId: itens.length === 1 ? itens[0].produtoId : "",
+        produtoNome: nomesProdutos,
 
         quantidade,
-        precoUnitario,
+        precoUnitario: itens.length === 1 ? itens[0].precoUnitario : 0,
         valor: totalVenda,
 
         valorRecebido,
@@ -2665,7 +2770,7 @@ function configurarVenda(data, produtos, clientes, currentRender) {
             tipo: "Entrada",
 
             descricao:
-              `Venda ${produto.nome} - ${cliente.nome} (${p.metodo})`,
+              `Venda ${nomesProdutos} - ${cliente.nome} (${p.metodo})`,
 
             categoria: "Venda",
 
@@ -2725,21 +2830,7 @@ function configurarVenda(data, produtos, clientes, currentRender) {
 
         // Devolver estoque se a gravação da venda falhar.
 
-        await runTransaction(
-
-          stockRef,
-
-          current => {
-
-            if (current === null || current === undefined) {
-              return;
-            }
-
-            return Number(current) + quantidade;
-
-          }
-
-        );
+        await devolverEstoque();
 
         throw err;
 
@@ -3025,54 +3116,18 @@ async function render() {
 
           return `
 
-            <label>
-              Produto
+            <div style="grid-column:1/-1">
 
-              <select name="produtoId" required>
+              <h3>Produtos da venda</h3>
 
-                <option value="">Selecione um produto</option>
+              <div id="itemsContainer"></div>
 
-                ${produtos.map(p => `
+              <button type="button" id="addItem">
+                <i class="fa-solid fa-plus"></i>
+                Adicionar produto
+              </button>
 
-                  <option
-                    value="${esc(p.id)}"
-                    ${Number(p.quantidade) <= 0 ? "disabled" : ""}
-                  >
-
-                    ${esc(p.nome)}
-                    - Estoque: ${esc(p.quantidade)}
-                    - ${brl(p.preco)}
-
-                  </option>
-
-                `).join("")}
-
-              </select>
-
-            </label>
-
-          `;
-
-        }
-
-
-        if (k === "quantidade") {
-
-          return `
-
-            <label>
-              Quantidade
-
-              <input
-                name="quantidade"
-                type="number"
-                min="0.01"
-                step="0.01"
-                value="1"
-                required
-              >
-
-            </label>
+            </div>
 
           `;
 
@@ -3092,18 +3147,6 @@ async function render() {
                 step="0.01"
                 readonly
                 required
-              >
-
-            </label>
-
-            <label>
-              Preço unitário
-
-              <input
-                name="precoUnitario"
-                type="number"
-                step="0.01"
-                readonly
               >
 
             </label>
